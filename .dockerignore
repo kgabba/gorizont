@@ -1,0 +1,15 @@
+# Keep large source assets and local tooling out of the image
+ChatGPT*.png
+Изображение*.png
+*ChatGPT*.png
+f81b6482*.png
+a7426050*.png
+gemini_generated_video*.mp4
+backend
+node_modules
+.next
+.git
+*.md
+.dockerignore
+Dockerfile
+docker-compose.yml

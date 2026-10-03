@@ -1,0 +1,19 @@
+services:
+  gorizo:
+    build: .
+    container_name: gorizo-web
+    restart: unless-stopped
+    networks:
+      - pro
+
+  gorizo-api:
+    build: ./backend
+    container_name: gorizo-api
+    restart: unless-stopped
+    networks:
+      - pro
+
+networks:
+  pro:
+    external: true
+    name: georisk-pro_pro

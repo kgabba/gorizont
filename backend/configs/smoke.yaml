@@ -1,0 +1,39 @@
+# Tiny smoke config for tests / quick local runs
+isotropic: false
+
+n_min_points: 8
+
+moi:
+  azimuth_step_deg: 45.0
+  dip_step_deg: 30.0
+  dip_min: -60.0
+  dip_max: 60.0
+
+directional:
+  tolerance_deg: 30.0
+  n_lags: 6
+  max_dist_percentile: 60.0
+  min_pairs: 3
+
+search_space:
+  radius_margin: 0.20
+  radius_prior_scale: 1.5
+  nugget_margin: 0.20
+  range_scale_min: 0.80
+  range_scale_max: 1.20
+  nmax_min: 5
+  nmax_max: 20
+
+cv:
+  method: spatial_block
+  grid_nx: 2
+  grid_ny: 2
+  grid_nz: 2
+  seed: 0
+
+optuna:
+  n_trials: 4
+  seed: 0
+  n_startup_trials: 2
+  n_ei_candidates: 8
+  invalid_penalty: 1000000.0

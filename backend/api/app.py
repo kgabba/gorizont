@@ -115,9 +115,17 @@ def _build_response(run_id: str, run_dir: Path, input_meta: dict[str, Any]) -> d
             "orientation_matrix": cand.get(
                 "orientation_matrix", result.get("orientation_matrix")
             ),
-            "major_axis_xyz": result.get("major_axis_xyz"),
-            "intermediate_axis_xyz": result.get("intermediate_axis_xyz"),
-            "minor_axis_xyz": result.get("minor_axis_xyz"),
+            # Axes must match aniso_candidate (what tuner used), not standalone
+            # top-level result — when ISO was forced, top-level axes are I.
+            "major_axis_xyz": cand.get(
+                "major_axis_xyz", result.get("major_axis_xyz")
+            ),
+            "intermediate_axis_xyz": cand.get(
+                "intermediate_axis_xyz", result.get("intermediate_axis_xyz")
+            ),
+            "minor_axis_xyz": cand.get(
+                "minor_axis_xyz", result.get("minor_axis_xyz")
+            ),
             "moi_strength": moi_strength,
         },
         "optimization": {

@@ -6,12 +6,10 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends build-essential \
   && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml setup.py README.md tune.py ./
-COPY aniso_ok_tuner_3d ./aniso_ok_tuner_3d
-COPY configs ./configs
+# Kernel from zip — copied as-is, not modified
+COPY kriging3d_tuner/ ./
 
 RUN pip install --no-cache-dir -e .
 
-EXPOSE 8000
-
-CMD ["uvicorn", "aniso_ok_tuner_3d.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# No HTTP API in this kernel; keep container alive for CLI use inside.
+CMD ["python", "-c", "import kriging3d_tuner; print('kriging3d_tuner ready'); import time; time.sleep(86400 * 365)"]

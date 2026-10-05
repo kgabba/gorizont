@@ -1,0 +1,28 @@
+n_min_points: 30
+seed: 42
+
+cv:
+  n_splits: 5
+  grid_nx: 3
+  grid_ny: 3
+  grid_nz: 2
+
+objective:
+  coverage_min: 0.97
+  coverage_penalty: 1.0e6
+  empty_rmse_fallback: 1.0e6
+
+search_space:
+  r_lo: 0.5
+  r_hi: 3.0
+  k_min: 0.05
+  nmin_lo: 4
+  nmin_hi: 12
+  nmax_lo: 8
+  nmax_hi: 64
+
+optuna:
+  n_trials: 200
+  n_startup_trials: null
+  n_ei_candidates: 64
+  flush_every: 25

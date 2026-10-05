@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gorizont3d"
+version = "0.1.0"
+description = "End-to-end orchestration: anisotropy3d → kriging3d_tuner"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+pipeline3d = "pipeline3d.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pipeline3d*"]

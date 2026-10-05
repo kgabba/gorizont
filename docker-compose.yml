@@ -10,6 +10,16 @@ services:
     build: ./backend
     container_name: gorizo-api
     restart: unless-stopped
+    environment:
+      RUNS_DIR: /app/runs
+    volumes:
+      - ./runs:/app/runs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
     networks:
       - pro
 

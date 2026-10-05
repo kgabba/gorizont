@@ -3,13 +3,28 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential \
+  && apt-get install -y --no-install-recommends build-essential curl \
   && rm -rf /var/lib/apt/lists/*
 
-# Kernel from zip — copied as-is, not modified
-COPY kriging3d_tuner/ ./
+# Math packages from gorizont3d — installed as-is, not modified
+COPY anisotropy3d/ ./anisotropy3d/
+COPY kriging3d_tuner/ ./kriging3d_tuner/
+COPY pipeline3d/ ./pipeline3d/
+COPY pyproject.toml ./
+COPY api/ ./api/
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir \
+  -e ./anisotropy3d \
+  -e ./kriging3d_tuner \
+  -e . \
+  fastapi uvicorn python-multipart
 
-# No HTTP API in this kernel; keep container alive for CLI use inside.
-CMD ["python", "-c", "import kriging3d_tuner; print('kriging3d_tuner ready'); import time; time.sleep(86400 * 365)"]
+ENV RUNS_DIR=/app/runs
+RUN mkdir -p /app/runs
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]

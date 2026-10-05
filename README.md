@@ -181,31 +181,23 @@ orientation_matrix
 Для двух точек $i,j$:
 
 $$
-\Delta\mathbf{x}_{ij}
-=
-\mathbf{x}_j-\mathbf{x}_i
+\Delta\mathbf{x}_{ij} = \mathbf{x}_j-\mathbf{x}_i
 $$
 
 $$
-h_{ij}
-=
-\|\Delta\mathbf{x}_{ij}\|
+h_{ij} = \|\Delta\mathbf{x}_{ij}\|
 $$
 
 Экспериментальная полувариация пары:
 
 $$
-\gamma_{ij}
-=
-\frac{1}{2}(z_j-z_i)^2
+\gamma_{ij} = \frac{1}{2}(z_j-z_i)^2
 $$
 
 Также сохраняется единичный вектор направления:
 
 $$
-\mathbf{u}_{ij}
-=
-\frac{\Delta\mathbf{x}_{ij}}{h_{ij}}
+\mathbf{u}_{ij} = \frac{\Delta\mathbf{x}_{ij}}{h_{ij}}
 $$
 
 ---
@@ -281,25 +273,13 @@ variogram:
 Модель имеет вид:
 
 $$
-\gamma(h)
-=
-n_0
-+
-c
-\left[
-\frac{3}{2}\frac{h}{a}
--
-\frac{1}{2}
-\left(\frac{h}{a}\right)^3
-\right],
-\qquad 0<h<a
+\gamma(h) = n_0 + c \left[ \frac{3}{2}\frac{h}{a} - \frac{1}{2} \left(\frac{h}{a}\right)^3 \right], \qquad 0<h<a
 $$
 
 и
 
 $$
-\gamma(h)=n_0+c,
-\qquad h\ge a
+\gamma(h)=n_0+c, \qquad h\ge a
 $$
 
 где:
@@ -373,20 +353,13 @@ angular_tolerance_deg: 22.5
 Для каждой валидной точки directional variogram вычисляется стандартизованная covariance-like величина:
 
 $$
-C =
-\operatorname{clip}
-\left(
-1-\frac{\gamma(h)}{n_0+c},
-0,
-1
-\right)
+C = \operatorname{clip} \left( 1-\frac{\gamma(h)}{n_0+c}, 0, 1 \right)
 $$
 
 Для расчёта MOI используется масса:
 
 $$
-m =
-\frac{C}{h^p}
+m = \frac{C}{h^p}
 $$
 
 где в текущем конфиге:
@@ -411,9 +384,7 @@ lag_frac_of_max_dist_max: 0.9
 то есть:
 
 $$
-0.2\,h_{max}
-\le h \le
-0.9\,h_{max}
+0.2\,h_{max} \le h \le 0.9\,h_{max}
 $$
 
 Это уменьшает чрезмерное влияние ближней к началу части covariance field и нестабильной крайней части вариограммы.
@@ -431,20 +402,13 @@ $$
 В inertia tensor добавляется:
 
 $$
-I
-\mathrel{+}=
-m
-\left(
-h^2I_3-\mathbf{r}\mathbf{r}^T
-\right)
+I \mathrel{+}= m \left( h^2I_3-\mathbf{r}\mathbf{r}^T \right)
 $$
 
 После этого выполняется eigen decomposition:
 
 $$
-I\mathbf{q}_k
-=
-\lambda_k\mathbf{q}_k
+I\mathbf{q}_k = \lambda_k\mathbf{q}_k
 $$
 
 Собственные значения сортируются по возрастанию.
@@ -460,12 +424,7 @@ largest eigenvalue   → minor continuity direction
 Полученные векторы образуют матрицу:
 
 $$
-Q=
-[
-\mathbf{q}_{major},
-\mathbf{q}_{intermediate},
-\mathbf{q}_{minor}
-]
+Q= [ \mathbf{q}_{major}, \mathbf{q}_{intermediate}, \mathbf{q}_{minor} ]
 $$
 
 Она используется как `orientation_matrix`.
@@ -505,11 +464,7 @@ refinement:
 После подгонки ranges и соответствующие им оси сортируются **связано**, чтобы выполнялось:
 
 $$
-a_{major}
-\ge
-a_{intermediate}
-\ge
-a_{minor}
+a_{major} \ge a_{intermediate} \ge a_{minor}
 $$
 
 Нельзя сортировать ranges отдельно от orientation vectors.
@@ -733,12 +688,7 @@ Search radii определяют, какие наблюдения разреш�
 Пусть:
 
 $$
-Q=
-[
-q_{major},
-q_{intermediate},
-q_{minor}
-]
+Q= [ q_{major}, q_{intermediate}, q_{minor} ]
 $$
 
 Для пространственного лага:
@@ -750,9 +700,7 @@ $$
 локальные координаты:
 
 $$
-x'
-=
-Q^T\Delta x
+x' = Q^T\Delta x
 $$
 
 То есть все вычисления search и variogram geometry выполняются в общей principal-axis системе.
@@ -764,21 +712,7 @@ $$
 Variogram distance:
 
 $$
-h'
-=
-\sqrt{
-\left(
-\frac{x'}{a_{major}}
-\right)^2
-+
-\left(
-\frac{y'}{a_{intermediate}}
-\right)^2
-+
-\left(
-\frac{z'}{a_{minor}}
-\right)^2
-}
+h' = \sqrt{ \left( \frac{x'}{a_{major}} \right)^2 + \left( \frac{y'}{a_{intermediate}} \right)^2 + \left( \frac{z'}{a_{minor}} \right)^2 }
 $$
 
 где:
@@ -800,26 +734,13 @@ a_minor
 Search neighbourhood имеет ту же ориентацию $Q$, но собственные semi-axes:
 
 $$
-R_{major},
-R_{inter},
-R_{minor}
+R_{major}, R_{inter}, R_{minor}
 $$
 
 Точка допускается в соседство только если:
 
 $$
-\left(
-\frac{x'}{R_{major}}
-\right)^2
-+
-\left(
-\frac{y'}{R_{inter}}
-\right)^2
-+
-\left(
-\frac{z'}{R_{minor}}
-\right)^2
-\le 1
+\left( \frac{x'}{R_{major}} \right)^2 + \left( \frac{y'}{R_{inter}} \right)^2 + \left( \frac{z'}{R_{minor}} \right)^2 \le 1
 $$
 
 Это **hard search ellipsoid**.
@@ -843,35 +764,23 @@ Nmax
 Второй и третий радиусы вычисляются:
 
 $$
-R_{inter}
-=
-R_{major}K_{inter}
+R_{inter} = R_{major}K_{inter}
 $$
 
 $$
-R_{minor}
-=
-R_{major}K_{minor}
+R_{minor} = R_{major}K_{minor}
 $$
 
 Ограничения:
 
 $$
-1
-\ge
-K_{inter}
-\ge
-K_{minor}
->
-0
+1 \ge K_{inter} \ge K_{minor} > 0
 $$
 
 и:
 
 $$
-N_{min}
-\le
-N_{max}
+N_{min} \le N_{max}
 $$
 
 Таким образом, порядок осей не ломается во время оптимизации.
@@ -899,12 +808,7 @@ search_space:
 Для major search radius:
 
 $$
-R_{major}
-\in
-[
-0.5a_{major},
-3.0a_{major}
-]
+R_{major} \in [ 0.5a_{major}, 3.0a_{major} ]
 $$
 
 Это **search space Optuna**, а не утверждение о том, что оптимальный search radius равен variogram range.
@@ -946,19 +850,7 @@ Euclidean nearest-neighbour rescue
 После выбора соседей строится система Ordinary Kriging:
 
 $$
-\begin{bmatrix}
-K & \mathbf{1} \\
-\mathbf{1}^T & 0
-\end{bmatrix}
-\begin{bmatrix}
-\lambda\\
-\mu
-\end{bmatrix}
-=
-\begin{bmatrix}
-k\\
-1
-\end{bmatrix}
+\begin{bmatrix} K & \mathbf{1} \\ \mathbf{1}^T & 0 \end{bmatrix} \begin{bmatrix} \lambda\\ \mu \end{bmatrix} = \begin{bmatrix} k\\ 1 \end{bmatrix}
 $$
 
 Для covariance используется spherical variogram geometry.
@@ -968,17 +860,13 @@ $$
 Для разных точек:
 
 $$
-K_{ij}
-=
-C(h'_{ij})
+K_{ij} = C(h'_{ij})
 $$
 
 На диагонали:
 
 $$
-K_{ii}
-=
-sill+nugget
+K_{ii} = sill+nugget
 $$
 
 Target-data covariance не получает дополнительный nugget.
@@ -998,9 +886,7 @@ numpy.linalg.lstsq
 Оценка:
 
 $$
-\hat z
-=
-\sum_i\lambda_i z_i
+\hat z = \sum_i\lambda_i z_i
 $$
 
 ---
@@ -1077,31 +963,19 @@ n_valid = targets с finite prediction
 Coverage:
 
 $$
-coverage
-=
-\frac{n_{valid}}{n_{tgt}}
+coverage = \frac{n_{valid}}{n_{tgt}}
 $$
 
 RMSE:
 
 $$
-RMSE
-=
-\sqrt{
-\frac{1}{n_{valid}}
-\sum
-(\hat z-z)^2
-}
+RMSE = \sqrt{ \frac{1}{n_{valid}} \sum (\hat z-z)^2 }
 $$
 
 MAE:
 
 $$
-MAE
-=
-\frac{1}{n_{valid}}
-\sum
-|\hat z-z|
+MAE = \frac{1}{n_{valid}} \sum |\hat z-z|
 $$
 
 RMSE и MAE вычисляются только для valid predictions.
@@ -1121,15 +995,7 @@ coverage_min: 0.97
 Objective:
 
 $$
-Objective
-=
-CV\_RMSE
-+
-P
-\max(
-0,\;
-0.97-coverage
-)
+Objective = CV\_RMSE + P \max( 0,\; 0.97-coverage )
 $$
 
 где:

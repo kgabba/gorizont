@@ -1,42 +1,47 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import FileUpload from "./FileUpload";
 
-type AnalyzeStatus = "idle" | "ready" | "running" | "done" | "error";
+type AnalyzeStatus =
+  | "idle"
+  | "inspecting"
+  | "confirm"
+  | "running"
+  | "error";
+
+type InspectResponse = {
+  columns: string[];
+  mapping: {
+    X: string | null;
+    Y: string | null;
+    Z: string | null;
+    Value: string | null;
+    HoleID: string | null;
+  };
+  confidence: Record<string, string>;
+  value_candidates: string[];
+  warnings: string[];
+  ready: boolean;
+  n_points: number;
+  detail?: string;
+};
 
 type AnalyzeResponse = {
   run_id: string;
   status: string;
-  input: { n_points: number; has_hole_id: boolean };
-  anisotropy: {
-    type?: string | null;
-    variogram_model?: string | null;
-    nugget?: number | null;
-    sill?: number | null;
-    range_major?: number | null;
-    range_intermediate?: number | null;
-    range_minor?: number | null;
-    orientation_matrix?: number[][] | null;
-    major_axis_xyz?: number[] | null;
-    intermediate_axis_xyz?: number[] | null;
-    minor_axis_xyz?: number[] | null;
-    moi_strength?: number | null;
-  };
-  optimization: {
-    R_major?: number | null;
-    R_inter?: number | null;
-    R_minor?: number | null;
-    K_inter?: number | null;
-    K_minor?: number | null;
-    Nmin?: number | null;
-    Nmax?: number | null;
-    CV_RMSE?: number | null;
-    CV_MAE?: number | null;
-    prediction_coverage?: number | null;
-    best_trial_number?: number | null;
-  };
+  anisotropy?: object;
+  optimization?: object;
   detail?: string;
+};
+
+type MappingState = {
+  X: string;
+  Y: string;
+  Z: string;
+  Value: string;
+  HoleID: string;
 };
 
 const STEPS = [
@@ -47,19 +52,56 @@ const STEPS = [
   "Готово",
 ] as const;
 
-function fmt(v: number | null | undefined, digits = 4): string {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
-  return Number(v).toLocaleString("ru-RU", {
-    maximumFractionDigits: digits,
-  });
+const NONE = "";
+
+function MappingSelect({
+  label,
+  value,
+  options,
+  allowEmpty,
+  emptyLabel,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="upload-map-field">
+      <span className="upload-map-label">{label}</span>
+      <select
+        className="upload-map-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {allowEmpty ? (
+          <option value={NONE}>{emptyLabel ?? "— не использовать —"}</option>
+        ) : (
+          <option value={NONE} disabled>
+            Выберите колонку
+          </option>
+        )}
+        {options.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 export default function UploadSection() {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<AnalyzeStatus>("idle");
   const [stepIdx, setStepIdx] = useState(0);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inspect, setInspect] = useState<InspectResponse | null>(null);
+  const [mapping, setMapping] = useState<MappingState | null>(null);
 
   useEffect(() => {
     if (status !== "running") return;
@@ -72,22 +114,63 @@ export default function UploadSection() {
     return () => timers.forEach(clearTimeout);
   }, [status]);
 
-  const onFileSelect = useCallback((f: File) => {
+  const onFileSelect = useCallback(async (f: File) => {
     setFile(f);
-    setStatus("ready");
-    setResult(null);
     setError(null);
+    setInspect(null);
+    setMapping(null);
     setStepIdx(0);
+    setStatus("inspecting");
+
+    const body = new FormData();
+    body.append("file", f);
+    try {
+      const res = await fetch("/api/inspect", { method: "POST", body });
+      const data = (await res.json().catch(() => null)) as
+        | InspectResponse
+        | { detail?: string }
+        | null;
+      if (!res.ok) {
+        const detail =
+          data && typeof data === "object" && "detail" in data
+            ? String(data.detail)
+            : `Ошибка ${res.status}`;
+        throw new Error(detail);
+      }
+      const ok = data as InspectResponse;
+      setInspect(ok);
+      setMapping({
+        X: ok.mapping.X ?? NONE,
+        Y: ok.mapping.Y ?? NONE,
+        Z: ok.mapping.Z ?? NONE,
+        Value: ok.mapping.Value ?? NONE,
+        HoleID: ok.mapping.HoleID ?? NONE,
+      });
+      setStatus("confirm");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+      setStatus("error");
+    }
   }, []);
 
   const runAnalyze = useCallback(async () => {
-    if (!file) return;
+    if (!file || !mapping) return;
+    if (!mapping.X || !mapping.Y || !mapping.Z || !mapping.Value) {
+      setError("Укажите колонки X, Y, Z и Value.");
+      setStatus("confirm");
+      return;
+    }
+
     setStatus("running");
     setError(null);
-    setResult(null);
 
     const body = new FormData();
     body.append("file", file);
+    body.append("col_x", mapping.X);
+    body.append("col_y", mapping.Y);
+    body.append("col_z", mapping.Z);
+    body.append("col_value", mapping.Value);
+    if (mapping.HoleID) body.append("col_holeid", mapping.HoleID);
 
     try {
       const res = await fetch("/api/analyze", {
@@ -116,13 +199,16 @@ export default function UploadSection() {
       }
 
       setStepIdx(4);
-      setResult(ok);
-      setStatus("done");
+      router.push(`/report/${ok.run_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
       setStatus("error");
     }
-  }, [file]);
+  }, [file, mapping, router]);
+
+  const columns = inspect?.columns ?? [];
+  const canConfirm =
+    !!mapping?.X && !!mapping?.Y && !!mapping?.Z && !!mapping?.Value;
 
   return (
     <section id="analyze" className="upload-section">
@@ -135,24 +221,94 @@ export default function UploadSection() {
         <div className="upload-section-drop">
           <FileUpload
             onFileSelect={onFileSelect}
-            disabled={status === "running"}
+            disabled={status === "running" || status === "inspecting"}
           />
         </div>
 
         <p className="upload-section-hint">
-          X · Y · Z · Value
-          <span className="upload-section-hint-opt"> · HoleID optional</span>
+          X · Y · Z · Value / Grade / Au…
+          <span className="upload-section-hint-opt">
+            {" "}
+            · HoleID optional
+          </span>
         </p>
 
-        {file && status !== "running" ? (
-          <div className="upload-section-actions">
-            <button
-              type="button"
-              className="upload-run-btn"
-              onClick={runAnalyze}
-            >
-              Запустить анализ
-            </button>
+        {status === "inspecting" ? (
+          <p className="upload-section-status">Определение колонок…</p>
+        ) : null}
+
+        {status === "confirm" && mapping && inspect ? (
+          <div className="upload-confirm">
+            <h3 className="upload-confirm-title">
+              Проверьте корректность данных
+            </h3>
+            <p className="upload-confirm-lead">
+              Найдено точек: {inspect.n_points}. Сопоставьте колонки файла с
+              полями анализа.
+            </p>
+
+            <div className="upload-map-grid">
+              <MappingSelect
+                label="X (координата)"
+                value={mapping.X}
+                options={columns}
+                onChange={(v) => setMapping({ ...mapping, X: v })}
+              />
+              <MappingSelect
+                label="Y (координата)"
+                value={mapping.Y}
+                options={columns}
+                onChange={(v) => setMapping({ ...mapping, Y: v })}
+              />
+              <MappingSelect
+                label="Z (координата)"
+                value={mapping.Z}
+                options={columns}
+                onChange={(v) => setMapping({ ...mapping, Z: v })}
+              />
+              <MappingSelect
+                label="Value (содержание)"
+                value={mapping.Value}
+                options={
+                  inspect.value_candidates.length > 0
+                    ? [
+                        ...inspect.value_candidates,
+                        ...columns.filter(
+                          (c) => !inspect.value_candidates.includes(c),
+                        ),
+                      ]
+                    : columns
+                }
+                onChange={(v) => setMapping({ ...mapping, Value: v })}
+              />
+              <MappingSelect
+                label="HoleID (скважина)"
+                value={mapping.HoleID}
+                options={columns}
+                allowEmpty
+                emptyLabel="— без HoleID —"
+                onChange={(v) => setMapping({ ...mapping, HoleID: v })}
+              />
+            </div>
+
+            {inspect.warnings.length > 0 ? (
+              <ul className="upload-confirm-warnings">
+                {inspect.warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            <div className="upload-section-actions">
+              <button
+                type="button"
+                className="upload-run-btn"
+                disabled={!canConfirm}
+                onClick={runAnalyze}
+              >
+                Подтвердить и запустить анализ
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -173,89 +329,6 @@ export default function UploadSection() {
 
         {status === "error" && error ? (
           <p className="upload-section-error">{error}</p>
-        ) : null}
-
-        {status === "done" && result ? (
-          <div className="analyze-result">
-            <p className="analyze-result-meta">
-              Точек: {result.input.n_points}
-              {result.input.has_hole_id ? " · HoleID" : ""}
-            </p>
-
-            <div className="analyze-result-block">
-              <h3 className="analyze-result-heading">Анизотропия</h3>
-              <dl className="analyze-result-grid">
-                <div>
-                  <dt>Major range</dt>
-                  <dd>{fmt(result.anisotropy.range_major)}</dd>
-                </div>
-                <div>
-                  <dt>Intermediate range</dt>
-                  <dd>{fmt(result.anisotropy.range_intermediate)}</dd>
-                </div>
-                <div>
-                  <dt>Minor range</dt>
-                  <dd>{fmt(result.anisotropy.range_minor)}</dd>
-                </div>
-                <div>
-                  <dt>Nugget</dt>
-                  <dd>{fmt(result.anisotropy.nugget)}</dd>
-                </div>
-                <div>
-                  <dt>Sill</dt>
-                  <dd>{fmt(result.anisotropy.sill)}</dd>
-                </div>
-                <div>
-                  <dt>Variogram model</dt>
-                  <dd>{result.anisotropy.variogram_model ?? "—"}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div className="analyze-result-block">
-              <h3 className="analyze-result-heading">Оптимизация</h3>
-              <dl className="analyze-result-grid">
-                <div>
-                  <dt>R major</dt>
-                  <dd>{fmt(result.optimization.R_major)}</dd>
-                </div>
-                <div>
-                  <dt>R inter</dt>
-                  <dd>{fmt(result.optimization.R_inter)}</dd>
-                </div>
-                <div>
-                  <dt>R minor</dt>
-                  <dd>{fmt(result.optimization.R_minor)}</dd>
-                </div>
-                <div>
-                  <dt>Nmin</dt>
-                  <dd>{fmt(result.optimization.Nmin, 0)}</dd>
-                </div>
-                <div>
-                  <dt>Nmax</dt>
-                  <dd>{fmt(result.optimization.Nmax, 0)}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div className="analyze-result-block">
-              <h3 className="analyze-result-heading">Валидация</h3>
-              <dl className="analyze-result-grid">
-                <div>
-                  <dt>CV RMSE</dt>
-                  <dd>{fmt(result.optimization.CV_RMSE)}</dd>
-                </div>
-                <div>
-                  <dt>CV MAE</dt>
-                  <dd>{fmt(result.optimization.CV_MAE)}</dd>
-                </div>
-                <div>
-                  <dt>Coverage</dt>
-                  <dd>{fmt(result.optimization.prediction_coverage)}</dd>
-                </div>
-              </dl>
-            </div>
-          </div>
         ) : null}
       </div>
     </section>

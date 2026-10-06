@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import os
 import uuid
@@ -11,10 +9,19 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from anisotropy3d.io import DataValidationError
 from kriging3d_tuner.cv import DataError
 from pipeline3d.pipeline import PipelineError, run_pipeline
+
+from .column_map import apply_mapping, inspect_csv_bytes
+from .report import (
+    artifact_media_type,
+    build_report,
+    resolve_artifact,
+    write_run_meta,
+)
 
 logger = logging.getLogger("gorizo.api")
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +48,8 @@ def _user_error(exc: BaseException) -> str:
     low = msg.lower()
     if "missing required column" in low or "missing column" in low:
         return "В CSV отсутствуют обязательные колонки X, Y, Z, Value."
+    if "missing mapped column" in low:
+        return "Некорректный выбор колонок. Проверьте соответствие полей."
     if "too few points" in low or "n_min" in low:
         return "Недостаточно точек для анализа."
     if "aniso_candidate" in low:
@@ -49,6 +58,8 @@ def _user_error(exc: BaseException) -> str:
         return "Этап анизотропии не создал result.json."
     if "invalid" in low and "csv" in low:
         return "Некорректный CSV."
+    if "no data rows" in low:
+        return "После выбора колонок не осталось строк с Value."
     if isinstance(exc, PipelineError):
         return f"Ошибка пайплайна: {msg}"
     if isinstance(exc, (DataValidationError, DataError)):
@@ -56,24 +67,54 @@ def _user_error(exc: BaseException) -> str:
     return "Не удалось выполнить анализ. Проверьте данные и попробуйте снова."
 
 
-def _inspect_csv(raw: bytes) -> dict[str, Any]:
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError("invalid CSV encoding") from exc
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
-        raise ValueError("invalid CSV: empty header")
-    cols = {c.strip() for c in reader.fieldnames if c}
-    required = {"X", "Y", "Z", "Value"}
-    missing = sorted(required - cols)
-    if missing:
-        raise ValueError(f"missing required columns: {', '.join(missing)}")
-    rows = list(reader)
-    return {
-        "n_points": len(rows),
-        "has_hole_id": "HoleID" in cols,
-    }
+def _canonical_or_mapped(
+    raw: bytes,
+    *,
+    col_x: str | None,
+    col_y: str | None,
+    col_z: str | None,
+    col_value: str | None,
+    col_holeid: str | None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Prefer explicit mapping; else auto-suggest; else accept already-canonical CSV."""
+    if col_x and col_y and col_z and col_value:
+        return apply_mapping(
+            raw,
+            col_x=col_x,
+            col_y=col_y,
+            col_z=col_z,
+            col_value=col_value,
+            col_holeid=col_holeid or None,
+        )
+
+    suggestion = inspect_csv_bytes(raw)
+    mapping = suggestion["mapping"]
+    if suggestion["ready"]:
+        return apply_mapping(
+            raw,
+            col_x=mapping["X"],
+            col_y=mapping["Y"],
+            col_z=mapping["Z"],
+            col_value=mapping["Value"],
+            col_holeid=mapping.get("HoleID"),
+        )
+
+    # Legacy: exact X,Y,Z,Value already present
+    cols = set(suggestion["columns"])
+    if {"X", "Y", "Z", "Value"} <= cols:
+        return apply_mapping(
+            raw,
+            col_x="X",
+            col_y="Y",
+            col_z="Z",
+            col_value="Value",
+            col_holeid="HoleID" if "HoleID" in cols else None,
+        )
+
+    raise ValueError(
+        "missing required columns: cannot map to X, Y, Z, Value — "
+        f"have {suggestion['columns']}"
+    )
 
 
 def _build_response(run_id: str, run_dir: Path, input_meta: dict[str, Any]) -> dict[str, Any]:
@@ -144,26 +185,88 @@ def _build_response(run_id: str, run_dir: Path, input_meta: dict[str, Any]) -> d
     }
 
 
+def _run_dir_or_404(run_id: str) -> Path:
+    if not run_id or "/" in run_id or ".." in run_id or "\\" in run_id:
+        raise HTTPException(status_code=404, detail="Прогон не найден.")
+    run_dir = (RUNS_DIR / run_id).resolve()
+    try:
+        run_dir.relative_to(RUNS_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Прогон не найден.") from exc
+    if not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Прогон не найден.")
+    return run_dir
+
+
+@app.get("/analysis/{run_id}")
+def get_analysis(run_id: str) -> dict[str, Any]:
+    run_dir = _run_dir_or_404(run_id)
+    try:
+        return build_report(run_id, run_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("report build failed for run_id=%s", run_id)
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось собрать отчёт по артефактам прогона.",
+        ) from exc
+
+
+@app.get("/analysis/{run_id}/artifacts/{artifact_path:path}")
+def get_analysis_artifact(run_id: str, artifact_path: str) -> FileResponse:
+    run_dir = _run_dir_or_404(run_id)
+    try:
+        path = resolve_artifact(run_dir, artifact_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Некорректный путь артефакта.") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Артефакт не найден.") from exc
+    return FileResponse(path, media_type=artifact_media_type(path))
+
+
+@app.post("/inspect")
+async def inspect_csv(file: UploadFile = File(...)) -> dict[str, Any]:
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Пустой файл.")
+    try:
+        return inspect_csv_bytes(raw)
+    except ValueError as exc:
+        logger.info("CSV inspect failed: %s", exc)
+        raise HTTPException(status_code=400, detail=_user_error(exc)) from exc
+
+
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
     trials: int | None = Form(None),
+    col_x: str | None = Form(None),
+    col_y: str | None = Form(None),
+    col_z: str | None = Form(None),
+    col_value: str | None = Form(None),
+    col_holeid: str | None = Form(None),
 ) -> dict[str, Any]:
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Пустой файл.")
 
     try:
-        input_meta = _inspect_csv(raw)
+        canonical, input_meta = _canonical_or_mapped(
+            raw,
+            col_x=col_x,
+            col_y=col_y,
+            col_z=col_z,
+            col_value=col_value,
+            col_holeid=col_holeid if col_holeid else None,
+        )
     except ValueError as exc:
-        logger.info("CSV validation failed: %s", exc)
+        logger.info("CSV mapping failed: %s", exc)
         raise HTTPException(status_code=400, detail=_user_error(exc)) from exc
 
     run_id = uuid.uuid4().hex
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     csv_path = run_dir / "input.csv"
-    csv_path.write_bytes(raw)
+    csv_path.write_bytes(canonical)
 
     try:
         run_pipeline(
@@ -172,6 +275,12 @@ async def analyze(
             aniso_config=ANISO_CONFIG,
             tuner_config=TUNER_CONFIG,
             n_trials=trials,
+        )
+        write_run_meta(
+            run_dir,
+            original_filename=file.filename,
+            n_points=int(input_meta["n_points"]),
+            has_hole_id=bool(input_meta["has_hole_id"]),
         )
         return _build_response(run_id, run_dir, input_meta)
     except (PipelineError, DataValidationError, DataError) as exc:

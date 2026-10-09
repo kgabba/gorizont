@@ -20,6 +20,31 @@ from .search_space import build_search_space
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
+def _write_search_progress(
+    progress_path: Path | None,
+    *,
+    trial: int,
+    n_trials: int,
+    best_objective: float | None = None,
+) -> None:
+    if progress_path is None:
+        return
+    payload: dict[str, Any] = {
+        "status": "running",
+        "stage": "search",
+        "stage_label": "Подбор области поиска",
+        "trial": int(trial),
+        "n_trials": int(n_trials),
+        "updated_at": time.time(),
+    }
+    if best_objective is not None:
+        payload["best_objective"] = float(best_objective)
+    progress_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def run_tuner(
     data_path: str | Path,
     anisotropy_path: str | Path,
@@ -27,10 +52,12 @@ def run_tuner(
     config_path: str | Path | None = None,
     *,
     n_trials: int | None = None,
+    progress_path: str | Path | None = None,
 ) -> dict[str, Any]:
     cfg = load_config(config_path)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    progress_file = Path(progress_path) if progress_path else None
 
     cloud = load_points_csv(data_path, cfg)
     vg = load_variogram_json(anisotropy_path)
@@ -66,6 +93,8 @@ def run_tuner(
     rows: list[dict[str, Any]] = []
     t0 = time.perf_counter()
 
+    _write_search_progress(progress_file, trial=0, n_trials=n_trials)
+
     def _callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         p = trial.params
         ua = trial.user_attrs
@@ -90,6 +119,18 @@ def run_tuner(
         )
         if len(rows) % flush_every == 0:
             pd.DataFrame(rows).to_csv(out / "trials.csv", index=False)
+        best_obj = (
+            float(study.best_value)
+            if study.best_trial is not None and study.best_value is not None
+            else None
+        )
+        # trial.number is 0-based; report completed count for the UI bar
+        _write_search_progress(
+            progress_file,
+            trial=int(trial.number) + 1,
+            n_trials=n_trials,
+            best_objective=best_obj,
+        )
         if study.best_trial is not None and trial.number == study.best_trial.number:
             print(
                 f"[kriging3d_tuner] new best trial={trial.number} "

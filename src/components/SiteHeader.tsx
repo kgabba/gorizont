@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { EXAMPLE_REPORT_PATH } from "@/lib/exampleReport";
 
 export default function SiteHeader() {
   const [hidden, setHidden] = useState(false);
@@ -34,6 +35,13 @@ export default function SiteHeader() {
         <a href="#analyze" className="site-header-link">
           Анализ
         </a>
+        <Link
+          href={EXAMPLE_REPORT_PATH}
+          className="site-header-link site-header-link-example"
+        >
+          <span className="site-header-link-full">Пример отчёта</span>
+          <span className="site-header-link-short">Пример</span>
+        </Link>
         <a href="#contacts" className="site-header-link">
           Контакты
         </a>

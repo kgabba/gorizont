@@ -3,19 +3,25 @@
 import { useEffect, useState } from "react";
 import type { AnalyzeReportData } from "@/lib/reportTypes";
 import Conclusion from "./Conclusion";
-import Optimization from "./Optimization";
 import ReportHeader from "./ReportHeader";
 import SearchParams from "./SearchParams";
 import SpatialStructure from "./SpatialStructure";
-import Validation from "./Validation";
+import TechnicalDetails from "./TechnicalDetails";
 
 const NAV = [
-  { id: "report-summary", label: "Итог" },
-  { id: "report-spatial", label: "Пространственная структура" },
-  { id: "report-search", label: "Параметры поиска" },
-  { id: "report-validation", label: "Валидация" },
-  { id: "report-optimization", label: "Оптимизация" },
-  { id: "report-conclusion", label: "Заключение" },
+  { id: "report-summary", label: "Сводка", short: "Сводка" },
+  {
+    id: "report-spatial",
+    label: "Вариограмма и анизотропия",
+    short: "Вариограмма",
+  },
+  { id: "report-search", label: "Область поиска", short: "Поиск" },
+  { id: "report-tech", label: "Технические детали", short: "Детали" },
+  {
+    id: "report-conclusion",
+    label: "Рекомендуемые параметры",
+    short: "Параметры",
+  },
 ] as const;
 
 export default function AnalyzeReport({ runId }: { runId: string }) {
@@ -77,25 +83,34 @@ export default function AnalyzeReport({ runId }: { runId: string }) {
   return (
     <div className="report-page">
       <nav className="report-nav" aria-label="Разделы отчёта">
-        <ul>
-          {NAV.map((item) => (
-            <li key={item.id}>
-              <a href={`#${item.id}`}>{item.label}</a>
-            </li>
-          ))}
-        </ul>
+        <div className="report-nav-inner">
+          <a href="/" className="report-nav-brand">
+            Горизонт
+          </a>
+          <ul>
+            {NAV.map((item) => (
+              <li key={item.id}>
+                <a href={`#${item.id}`}>
+                  <span className="report-nav-label-full">{item.label}</span>
+                  <span className="report-nav-label-short">{item.short}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
       </nav>
 
       <div className="report-body">
         <ReportHeader data={data} />
         <SpatialStructure data={data} />
         <SearchParams data={data} />
-        <Validation data={data} />
-        <Optimization data={data} />
+        <TechnicalDetails data={data} />
         <Conclusion data={data} />
 
         <p className="report-footer-link">
-          <a href="/#analyze">Новый анализ</a>
+          <a href="/#analyze" className="report-footer-btn">
+            Новый анализ
+          </a>
         </p>
       </div>
     </div>

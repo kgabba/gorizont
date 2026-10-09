@@ -75,7 +75,10 @@ def _plot_omni(path: Path, fit: VariogramFit, title: str = "Omnidirectional vari
     fig, ax = plt.subplots(figsize=(6, 4))
     if fit.lag.size:
         ax.scatter(fit.lag, fit.gamma, c="C0", s=40, zorder=3, label="experimental")
-        h = np.linspace(0, float(np.max(fit.lag)) * 1.05, 200)
+        # Start slightly above 0 so the plot shows γ(0+)=nugget without a
+        # meaningless vertical jump from theoretical γ(0)=0.
+        h_max = float(np.max(fit.lag)) * 1.05
+        h = np.linspace(max(h_max * 1e-6, 1e-9), h_max, 200)
         ax.plot(
             h,
             spherical_model(h, fit.nugget, fit.sill, fit.range_),
@@ -85,6 +88,12 @@ def _plot_omni(path: Path, fit: VariogramFit, title: str = "Omnidirectional vari
         )
         ax.axhline(fit.nugget + fit.sill, color="gray", ls="--", lw=1, label="sill")
         ax.legend(fontsize=8)
+        # Always anchor γ at 0 so the scale is not clipped to the nugget.
+        y_top = max(
+            float(np.nanmax(fit.gamma)),
+            float(fit.nugget + fit.sill),
+        )
+        ax.set_ylim(0.0, y_top * 1.08 if y_top > 0 else 1.0)
     ax.set_xlabel("h")
     ax.set_ylabel("γ(h)")
     ax.set_title(title)

@@ -336,7 +336,8 @@ export default function ContinuityEllipsoidView({
   if (!canRender) {
     return (
       <p className="report-section-note">
-        3D continuity ellipsoid недоступен: нет полных ranges/ориентации.
+        3D-вид эллипсоида вариограммы недоступен: нет полных диапазонов или
+        ориентации.
       </p>
     );
   }
@@ -346,18 +347,20 @@ export default function ContinuityEllipsoidView({
       <div className="report-ellipsoid-canvas" ref={mountRef} />
       <ul className="report-ellipsoid-legend">
         <li>
-          <span className="swatch is-maj" /> Major (длина = range major)
+          <span className="swatch is-maj" /> Ось 1 — направление наибольшей
+          непрерывности
         </li>
         <li>
-          <span className="swatch is-int" /> Intermediate
+          <span className="swatch is-int" /> Ось 2 — промежуточное направление
         </li>
         <li>
-          <span className="swatch is-min" /> Minor
+          <span className="swatch is-min" /> Ось 3 — направление наименьшей
+          непрерывности
         </li>
-        <li>сетки — внешний каркас с буфером, без сечения эллипсоида</li>
       </ul>
       <p className="report-section-note">
-        Визуализация сохранённых ranges и осей. Вращение мышью.
+        Эллипсоид показывает, насколько далеко по каждому направлению сохраняется
+        связь содержаний (диапазоны вариограммы).
       </p>
     </div>
   );

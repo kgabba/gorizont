@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,7 @@ from fastapi.responses import FileResponse
 
 from anisotropy3d.io import DataValidationError
 from kriging3d_tuner.cv import DataError
-from pipeline3d.pipeline import PipelineError, run_pipeline
+from pipeline3d.pipeline import PipelineError, run_pipeline, write_progress
 
 from .column_map import apply_mapping, inspect_csv_bytes
 from .report import (
@@ -235,6 +237,101 @@ async def inspect_csv(file: UploadFile = File(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=_user_error(exc)) from exc
 
 
+def _read_progress(run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / "progress.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _run_analyze_job(
+    *,
+    run_id: str,
+    run_dir: Path,
+    csv_path: Path,
+    input_meta: dict[str, Any],
+    original_filename: str | None,
+    n_trials: int | None,
+) -> None:
+    try:
+        write_progress(
+            run_dir,
+            status="running",
+            stage="upload",
+            stage_label="Загрузка данных",
+            trial=None,
+            n_trials=n_trials,
+        )
+        run_pipeline(
+            data_path=csv_path,
+            out_dir=run_dir,
+            aniso_config=ANISO_CONFIG,
+            tuner_config=TUNER_CONFIG,
+            n_trials=n_trials,
+        )
+        write_run_meta(
+            run_dir,
+            original_filename=original_filename,
+            n_points=int(input_meta["n_points"]),
+            has_hole_id=bool(input_meta["has_hole_id"]),
+        )
+        # pipeline already marks completed; keep meta on progress
+        prog = _read_progress(run_dir) or {}
+        write_progress(
+            run_dir,
+            status="completed",
+            stage="done",
+            stage_label="Готово",
+            trial=prog.get("trial"),
+            n_trials=prog.get("n_trials") or n_trials,
+            best_trial_number=prog.get("best_trial_number"),
+            n_points=int(input_meta["n_points"]),
+        )
+    except (PipelineError, DataValidationError, DataError) as exc:
+        logger.exception("analyze failed for run_id=%s", run_id)
+        write_progress(
+            run_dir,
+            status="failed",
+            stage="error",
+            stage_label="Ошибка",
+            error=_user_error(exc),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("unexpected analyze failure for run_id=%s", run_id)
+        write_progress(
+            run_dir,
+            status="failed",
+            stage="error",
+            stage_label="Ошибка",
+            error=_user_error(exc),
+        )
+
+
+@app.get("/analysis/{run_id}/status")
+def get_analysis_status(run_id: str) -> dict[str, Any]:
+    run_dir = _run_dir_or_404(run_id)
+    prog = _read_progress(run_dir) or {}
+    status = str(prog.get("status") or "running")
+    best_path = run_dir / "kriging_tuning" / "best_params.json"
+    if status != "failed" and best_path.is_file() and (run_dir / "pipeline_summary.json").is_file():
+        status = "completed"
+    out: dict[str, Any] = {
+        "run_id": run_id,
+        "status": status,
+        "stage": prog.get("stage"),
+        "stage_label": prog.get("stage_label"),
+        "trial": prog.get("trial"),
+        "n_trials": prog.get("n_trials"),
+        "best_objective": prog.get("best_objective"),
+        "error": prog.get("error"),
+    }
+    return out
+
+
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
@@ -267,28 +364,42 @@ async def analyze(
     run_dir.mkdir(parents=True, exist_ok=True)
     csv_path = run_dir / "input.csv"
     csv_path.write_bytes(canonical)
+    write_run_meta(
+        run_dir,
+        original_filename=file.filename,
+        n_points=int(input_meta["n_points"]),
+        has_hole_id=bool(input_meta["has_hole_id"]),
+    )
+    write_progress(
+        run_dir,
+        status="running",
+        stage="upload",
+        stage_label="Загрузка данных",
+        trial=None,
+        n_trials=trials,
+        n_points=int(input_meta["n_points"]),
+    )
 
-    try:
-        run_pipeline(
-            data_path=csv_path,
-            out_dir=run_dir,
-            aniso_config=ANISO_CONFIG,
-            tuner_config=TUNER_CONFIG,
-            n_trials=trials,
-        )
-        write_run_meta(
-            run_dir,
-            original_filename=file.filename,
-            n_points=int(input_meta["n_points"]),
-            has_hole_id=bool(input_meta["has_hole_id"]),
-        )
-        return _build_response(run_id, run_dir, input_meta)
-    except (PipelineError, DataValidationError, DataError) as exc:
-        logger.exception("analyze failed for run_id=%s", run_id)
-        raise HTTPException(status_code=400, detail=_user_error(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("unexpected analyze failure for run_id=%s", run_id)
-        raise HTTPException(
-            status_code=400,
-            detail=_user_error(exc),
-        ) from exc
+    thread = threading.Thread(
+        target=_run_analyze_job,
+        kwargs={
+            "run_id": run_id,
+            "run_dir": run_dir,
+            "csv_path": csv_path,
+            "input_meta": input_meta,
+            "original_filename": file.filename,
+            "n_trials": trials,
+        },
+        name=f"analyze-{run_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "run_id": run_id,
+        "status": "running",
+        "input": {
+            "n_points": int(input_meta["n_points"]),
+            "has_hole_id": bool(input_meta["has_hole_id"]),
+        },
+    }

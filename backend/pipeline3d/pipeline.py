@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from anisotropy3d.pipeline import run_anisotropy3d
 from kriging3d_tuner.pipeline import run_tuner
+
+
+def write_progress(out_dir: str | Path, **fields: Any) -> None:
+    """UI progress file at run root — no math effect."""
+    path = Path(out_dir) / "progress.json"
+    payload = {"updated_at": time.time(), **fields}
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 # Fields required by kriging3d_tuner.load_variogram_json for aniso_candidate
 _REQUIRED_ANISO_FIELDS = (
@@ -79,6 +90,14 @@ def run_pipeline(
     aniso_out.mkdir(parents=True, exist_ok=True)
     # do not create tune_out until gate passes
 
+    write_progress(
+        out_dir,
+        status="running",
+        stage="anisotropy",
+        stage_label="Анализ пространственной структуры",
+        trial=None,
+        n_trials=None,
+    )
     print(f"[pipeline3d] stage1 anisotropy3d → {aniso_out}", flush=True)
     run_anisotropy3d(data_path, aniso_out, aniso_config)
 
@@ -87,6 +106,23 @@ def run_pipeline(
     cand = validate_aniso_candidate(result_json)
 
     tune_out.mkdir(parents=True, exist_ok=True)
+    trials_for_ui = n_trials
+    if trials_for_ui is None:
+        try:
+            import yaml
+
+            ocfg = yaml.safe_load(tuner_config.read_text(encoding="utf-8")) or {}
+            trials_for_ui = int((ocfg.get("optuna") or {}).get("n_trials", 200))
+        except Exception:  # noqa: BLE001
+            trials_for_ui = 200
+    write_progress(
+        out_dir,
+        status="running",
+        stage="search",
+        stage_label="Подбор области поиска",
+        trial=0,
+        n_trials=trials_for_ui,
+    )
     print(f"[pipeline3d] stage2 kriging3d_tuner → {tune_out}", flush=True)
     tune_result = run_tuner(
         data_path=data_path,
@@ -94,6 +130,7 @@ def run_pipeline(
         out_dir=tune_out,
         config_path=tuner_config,
         n_trials=n_trials,
+        progress_path=out_dir / "progress.json",
     )
 
     summary = {
@@ -127,6 +164,15 @@ def run_pipeline(
     summary_path.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False),
         encoding="utf-8",
+    )
+    write_progress(
+        out_dir,
+        status="completed",
+        stage="done",
+        stage_label="Готово",
+        trial=tune_result.get("n_trials"),
+        n_trials=tune_result.get("n_trials"),
+        best_trial_number=tune_result.get("best_trial_number"),
     )
     print(f"[pipeline3d] done → {summary_path}", flush=True)
     return summary

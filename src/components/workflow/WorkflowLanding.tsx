@@ -1,5 +1,6 @@
 import SiteHeader from "@/components/SiteHeader";
 import UploadSection from "@/components/UploadSection";
+import { EXAMPLE_REPORT_PATH } from "@/lib/exampleReport";
 import { WORKFLOW_STEPS, type WorkflowStep } from "./steps";
 
 const PRODUCT_STEP =
@@ -108,6 +109,9 @@ function DetailPanel({ step }: { step: WorkflowStep }) {
         <div className="workflow-detail-actions">
           <a href="#analyze" className="workflow-cta">
             {step.cta.label}
+          </a>
+          <a href={EXAMPLE_REPORT_PATH} className="workflow-cta-secondary">
+            Пример отчёта
           </a>
         </div>
       ) : null}

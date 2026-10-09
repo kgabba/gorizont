@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FileUpload from "./FileUpload";
 
 type AnalyzeStatus =
@@ -28,12 +28,21 @@ type InspectResponse = {
   detail?: string;
 };
 
-type AnalyzeResponse = {
+type AnalyzeStartResponse = {
   run_id: string;
   status: string;
-  anisotropy?: object;
-  optimization?: object;
   detail?: string;
+};
+
+type ProgressStatus = {
+  run_id: string;
+  status: string;
+  stage?: string | null;
+  stage_label?: string | null;
+  trial?: number | null;
+  n_trials?: number | null;
+  best_objective?: number | null;
+  error?: string | null;
 };
 
 type MappingState = {
@@ -45,14 +54,31 @@ type MappingState = {
 };
 
 const STEPS = [
-  "Загрузка данных",
-  "Анализ пространственной структуры",
-  "Анизотропия и вариография",
-  "Оптимизация параметров",
-  "Готово",
+  { id: "upload", label: "Загрузка данных" },
+  { id: "anisotropy", label: "Анализ пространственной структуры" },
+  { id: "variogram", label: "Вариограмма и анизотропия" },
+  { id: "search", label: "Подбор области поиска" },
+  { id: "done", label: "Готово" },
 ] as const;
 
 const NONE = "";
+
+function stageToStepIdx(stage: string | null | undefined): number {
+  switch (stage) {
+    case "upload":
+      return 0;
+    case "anisotropy":
+      return 1;
+    case "search":
+      return 3;
+    case "done":
+      return 4;
+    case "error":
+      return 3;
+    default:
+      return 1;
+  }
+}
 
 function MappingSelect({
   label,
@@ -102,23 +128,24 @@ export default function UploadSection() {
   const [error, setError] = useState<string | null>(null);
   const [inspect, setInspect] = useState<InspectResponse | null>(null);
   const [mapping, setMapping] = useState<MappingState | null>(null);
+  const [progress, setProgress] = useState<ProgressStatus | null>(null);
+  const pollRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (status !== "running") return;
-    setStepIdx(0);
-    const timers = [
-      window.setTimeout(() => setStepIdx(1), 400),
-      window.setTimeout(() => setStepIdx(2), 1200),
-      window.setTimeout(() => setStepIdx(3), 2400),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [status]);
+  const stopPolling = useCallback(() => {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
   const onFileSelect = useCallback(async (f: File) => {
     setFile(f);
     setError(null);
     setInspect(null);
     setMapping(null);
+    setProgress(null);
     setStepIdx(0);
     setStatus("inspecting");
 
@@ -153,6 +180,47 @@ export default function UploadSection() {
     }
   }, []);
 
+  const pollStatus = useCallback(
+    async (runId: string) => {
+      try {
+        const res = await fetch(
+          `/api/analysis/${encodeURIComponent(runId)}/status`,
+        );
+        const data = (await res.json().catch(() => null)) as
+          | ProgressStatus
+          | { detail?: string }
+          | null;
+        if (!res.ok) {
+          const detail =
+            data && typeof data === "object" && "detail" in data
+              ? String(data.detail)
+              : `Ошибка ${res.status}`;
+          throw new Error(detail);
+        }
+        const prog = data as ProgressStatus;
+        setProgress(prog);
+        setStepIdx(stageToStepIdx(prog.stage));
+
+        if (prog.status === "completed") {
+          stopPolling();
+          setStepIdx(4);
+          router.push(`/report/${runId}`);
+          return;
+        }
+        if (prog.status === "failed") {
+          stopPolling();
+          setError(prog.error || "Не удалось выполнить анализ.");
+          setStatus("error");
+        }
+      } catch (err) {
+        stopPolling();
+        setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+        setStatus("error");
+      }
+    },
+    [router, stopPolling],
+  );
+
   const runAnalyze = useCallback(async () => {
     if (!file || !mapping) return;
     if (!mapping.X || !mapping.Y || !mapping.Z || !mapping.Value) {
@@ -161,8 +229,11 @@ export default function UploadSection() {
       return;
     }
 
+    stopPolling();
     setStatus("running");
     setError(null);
+    setProgress(null);
+    setStepIdx(0);
 
     const body = new FormData();
     body.append("file", file);
@@ -178,9 +249,9 @@ export default function UploadSection() {
         body,
       });
 
-      let data: AnalyzeResponse | { detail?: string } | null = null;
+      let data: AnalyzeStartResponse | { detail?: string } | null = null;
       try {
-        data = (await res.json()) as AnalyzeResponse;
+        data = (await res.json()) as AnalyzeStartResponse;
       } catch {
         data = null;
       }
@@ -193,30 +264,44 @@ export default function UploadSection() {
         throw new Error(detail);
       }
 
-      const ok = data as AnalyzeResponse;
-      if (!ok?.run_id || !ok.anisotropy || !ok.optimization) {
+      const ok = data as AnalyzeStartResponse;
+      if (!ok?.run_id) {
         throw new Error("Неполный ответ сервера");
       }
 
-      setStepIdx(4);
-      router.push(`/report/${ok.run_id}`);
+      setProgress({
+        run_id: ok.run_id,
+        status: "running",
+        stage: "upload",
+        stage_label: "Загрузка данных",
+      });
+      await pollStatus(ok.run_id);
+      pollRef.current = window.setInterval(() => {
+        void pollStatus(ok.run_id);
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
       setStatus("error");
     }
-  }, [file, mapping, router]);
+  }, [file, mapping, pollStatus, stopPolling]);
 
   const columns = inspect?.columns ?? [];
   const canConfirm =
     !!mapping?.X && !!mapping?.Y && !!mapping?.Z && !!mapping?.Value;
 
+  const trial = progress?.trial ?? 0;
+  const nTrials = progress?.n_trials ?? 0;
+  const searchActive = progress?.stage === "search" && nTrials > 0;
+  const barPct = searchActive
+    ? Math.min(100, Math.round((Number(trial) / Number(nTrials)) * 100))
+    : progress?.stage === "done"
+      ? 100
+      : 0;
+
   return (
     <section id="analyze" className="upload-section">
       <div className="upload-section-inner">
         <h2 className="upload-section-title">Загрузите данные</h2>
-        <p className="upload-section-lead">
-          CSV для анизотропии и подбора параметров Ordinary Kriging
-        </p>
 
         <div className="upload-section-drop">
           <FileUpload
@@ -226,10 +311,10 @@ export default function UploadSection() {
         </div>
 
         <p className="upload-section-hint">
-          X · Y · Z · Value / Grade / Au…
+          X · Y · Z · Содержание
           <span className="upload-section-hint-opt">
             {" "}
-            · HoleID optional
+            · HoleID (необяз.)
           </span>
         </p>
 
@@ -267,7 +352,7 @@ export default function UploadSection() {
                 onChange={(v) => setMapping({ ...mapping, Z: v })}
               />
               <MappingSelect
-                label="Value (содержание)"
+                label="Содержание (Value)"
                 value={mapping.Value}
                 options={
                   inspect.value_candidates.length > 0
@@ -313,18 +398,48 @@ export default function UploadSection() {
         ) : null}
 
         {status === "running" ? (
-          <ol className="upload-steps">
-            {STEPS.map((label, i) => (
-              <li
-                key={label}
-                className={`upload-step${
-                  i < stepIdx ? " is-done" : i === stepIdx ? " is-active" : ""
-                }`}
-              >
-                {label}
-              </li>
-            ))}
-          </ol>
+          <div className="upload-progress">
+            <ol className="upload-steps">
+              {STEPS.map((step, i) => (
+                <li
+                  key={step.id}
+                  className={`upload-step${
+                    i < stepIdx
+                      ? " is-done"
+                      : i === stepIdx
+                        ? " is-active"
+                        : ""
+                  }`}
+                >
+                  {step.label}
+                </li>
+              ))}
+            </ol>
+
+            {searchActive ? (
+              <div className="upload-trial-progress" aria-live="polite">
+                <div className="upload-trial-meta">
+                  <span>
+                    Итерация {Math.min(Number(trial), Number(nTrials))} из{" "}
+                    {nTrials}
+                  </span>
+                  <span>{barPct}%</span>
+                </div>
+                <div
+                  className="upload-trial-bar"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={barPct}
+                >
+                  <div
+                    className="upload-trial-bar-fill"
+                    style={{ width: `${barPct}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {status === "error" && error ? (

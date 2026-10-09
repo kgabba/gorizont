@@ -13,17 +13,32 @@ PROXIMITY_FRAC = 0.05
 COVERAGE_WARN = 0.97
 
 CV_LABELS = {
-    "group_kfold": "GroupKFold (по HoleID)",
-    "spatial_block": "Spatial block CV",
-    "kfold": "KFold",
+    "group_kfold": "По скважинам (GroupKFold, HoleID)",
+    "spatial_block": "Блочная пространственная кросс-валидация",
+    "kfold": "K-fold кросс-валидация",
 }
 
+ANISO_PNG_LABELS = {
+    "omnidirectional_variogram.png": "Всенаправленная вариограмма",
+    "principal_axes.png": "Главные оси анизотропии",
+    "major_variogram.png": "Направленная вариограмма, ось 1 (главная)",
+    "intermediate_variogram.png": "Направленная вариограмма, ось 2 (промежуточная)",
+    "minor_variogram.png": "Направленная вариограмма, ось 3 (малая)",
+}
+
+# Directional VGs and principal_axes hidden from report UI for now
+# (still generated as run artifacts).
 ANISO_PNG_ORDER = (
     "omnidirectional_variogram.png",
-    "principal_axes.png",
-    "major_variogram.png",
-    "intermediate_variogram.png",
-    "minor_variogram.png",
+)
+
+ANISO_PNG_HIDDEN = frozenset(
+    {
+        "principal_axes.png",
+        "major_variogram.png",
+        "intermediate_variogram.png",
+        "minor_variogram.png",
+    }
 )
 
 
@@ -137,14 +152,14 @@ def _proximity(
     if value is None or lo is None or hi is None:
         return {
             "status": "unknown",
-            "label": "Нет данных о диапазоне",
+            "label": "Нет данных",
             "near_bound": None,
         }
     span = float(hi) - float(lo)
     if span <= 0:
         return {
             "status": "inside",
-            "label": "Внутри диапазона",
+            "label": "В пределах диапазона",
             "near_bound": None,
         }
     margin = PROXIMITY_FRAC * span
@@ -154,14 +169,14 @@ def _proximity(
     if near_lo or near_hi:
         return {
             "status": "near_bound",
-            "label": "Близко к границе диапазона",
+            "label": "У края диапазона",
             "near_bound": "min" if near_lo and not near_hi else (
                 "max" if near_hi and not near_lo else "both"
             ),
         }
     return {
         "status": "inside",
-        "label": "Внутри диапазона",
+        "label": "В пределах диапазона",
         "near_bound": None,
     }
 
@@ -175,7 +190,7 @@ def _cv_label(cv: dict[str, Any] | None) -> str | None:
         return None
     n_folds = cv.get("n_folds") or cv.get("n_splits_requested")
     if n_folds is not None:
-        return f"{label}, {n_folds} folds"
+        return f"{label}, {n_folds} фолдов"
     return label
 
 
@@ -192,16 +207,22 @@ def _list_aniso_images(aniso_dir: Path) -> list[dict[str, str]]:
                 {
                     "name": name,
                     "path": f"anisotropy/{name}",
-                    "label": name.replace(".png", "").replace("_", " "),
+                    "label": ANISO_PNG_LABELS.get(
+                        name, name.replace(".png", "").replace("_", " ")
+                    ),
                 }
             )
             del found[name]
     for name in sorted(found):
+        if name in ANISO_PNG_HIDDEN:
+            continue
         images.append(
             {
                 "name": name,
                 "path": f"anisotropy/{name}",
-                "label": name.replace(".png", "").replace("_", " "),
+                "label": ANISO_PNG_LABELS.get(
+                    name, name.replace(".png", "").replace("_", " ")
+                ),
             }
         )
     return images
@@ -415,9 +436,18 @@ def build_report(run_id: str, run_dir: Path) -> dict[str, Any]:
         "artifacts": {"images": images},
         "conclusion_inputs": {
             "anisotropy_type": spatial.get("anisotropy_type"),
+            "variogram_model": spatial.get("variogram_model"),
+            "nugget": spatial.get("nugget"),
+            "sill": spatial.get("sill"),
             "range_major": spatial.get("range_major"),
             "range_intermediate": spatial.get("range_intermediate"),
             "range_minor": spatial.get("range_minor"),
+            "major_azimuth_deg": spatial.get("major_azimuth_deg"),
+            "major_dip_deg": spatial.get("major_dip_deg"),
+            "intermediate_azimuth_deg": spatial.get("intermediate_azimuth_deg"),
+            "intermediate_dip_deg": spatial.get("intermediate_dip_deg"),
+            "minor_azimuth_deg": spatial.get("minor_azimuth_deg"),
+            "minor_dip_deg": spatial.get("minor_dip_deg"),
             "CV_RMSE": best.get("CV_RMSE"),
             "CV_MAE": best.get("CV_MAE"),
             "prediction_coverage": coverage,

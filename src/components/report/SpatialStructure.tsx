@@ -2,8 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import {
+  AXIS,
+  anisoTypeLabel,
+  variogramModelLabel,
+} from "@/lib/reportLabels";
 import type { AnalyzeReportData } from "@/lib/reportTypes";
-import { artifactUrl, fmtAxis, fmtNum } from "@/lib/reportTypes";
+import { artifactUrl, fmtNum } from "@/lib/reportTypes";
+import Hint from "./Hint";
 
 const ContinuityEllipsoidView = dynamic(
   () => import("./ContinuityEllipsoidView"),
@@ -38,17 +44,17 @@ function ArtifactImage({
 function AxisAngles({ data }: { data: AnalyzeReportData["spatial_structure"] }) {
   const rows = [
     {
-      name: "Major",
+      name: AXIS.major,
       az: data.major_azimuth_deg,
       dip: data.major_dip_deg,
     },
     {
-      name: "Intermediate",
+      name: AXIS.intermediate,
       az: data.intermediate_azimuth_deg,
       dip: data.intermediate_dip_deg,
     },
     {
-      name: "Minor",
+      name: AXIS.minor,
       az: data.minor_azimuth_deg,
       dip: data.minor_dip_deg,
     },
@@ -60,23 +66,23 @@ function AxisAngles({ data }: { data: AnalyzeReportData["spatial_structure"] }) 
         <thead>
           <tr>
             <th>Ось</th>
-            <th>Azimuth °</th>
-            <th>Dip °</th>
+            <th>Азимут °</th>
+            <th>Погружение °</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.name}>
               <td>{r.name}</td>
-              <td>{fmtNum(r.az, 2)}</td>
-              <td>{fmtNum(r.dip, 2)}</td>
+              <td>{fmtNum(r.az, 1)}</td>
+              <td>{fmtNum(r.dip, 1)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <p className="report-angles-note">
-        Конвенция: azimuth 0 = +X, против часовой к +Y; dip 0 = горизонталь, 90
-        = +Z. Углы от осей aniso_candidate.
+        Конвенция: азимут 0° = +X, против часовой к +Y; погружение 0° =
+        горизонталь, 90° = +Z.
       </p>
     </div>
   );
@@ -84,73 +90,66 @@ function AxisAngles({ data }: { data: AnalyzeReportData["spatial_structure"] }) 
 
 export default function SpatialStructure({ data }: { data: AnalyzeReportData }) {
   const s = data.spatial_structure;
-  // principal_axes.png excluded — replaced by interactive continuity ellipsoid
+  // Hide principal axes (3D ellipsoid instead) and directional VGs for now
+  const HIDDEN_IMAGES = new Set([
+    "principal_axes.png",
+    "major_variogram.png",
+    "intermediate_variogram.png",
+    "minor_variogram.png",
+  ]);
   const images = (data.artifacts?.images ?? []).filter(
-    (i) => i.name !== "principal_axes.png",
+    (i) => !HIDDEN_IMAGES.has(i.name),
   );
 
   return (
     <section id="report-spatial" className="report-section">
-      <h2 className="report-section-title">Пространственная структура</h2>
+      <h2 className="report-section-title">Вариограмма и анизотропия</h2>
       <p className="report-section-note">
-        Variogram / continuity ellipsoid — параметры пространственной
-        непрерывности. Не путать с search neighbourhood.
+        Параметры пространственной непрерывности (эллипсоид вариограммы). Может
+        отличаться от области поиска при интерполяции!
       </p>
 
       <dl className="report-grid">
         <div>
-          <dt>Тип</dt>
-          <dd>{s.anisotropy_type ?? "—"}</dd>
+          <dt>Тип анизотропии</dt>
+          <dd>{anisoTypeLabel(s.anisotropy_type)}</dd>
         </div>
         <div>
-          <dt>Variogram model</dt>
-          <dd>{s.variogram_model ?? "—"}</dd>
+          <dt>Модель вариограммы</dt>
+          <dd>{variogramModelLabel(s.variogram_model)}</dd>
         </div>
         <div>
-          <dt>Nugget</dt>
-          <dd>{fmtNum(s.nugget)}</dd>
+          <dt>Эффект самородка (nugget)</dt>
+          <dd>{fmtNum(s.nugget, 3)}</dd>
         </div>
         <div>
-          <dt>Sill</dt>
-          <dd>{fmtNum(s.sill)}</dd>
+          <dt>Порог (sill)</dt>
+          <dd>{fmtNum(s.sill, 3)}</dd>
         </div>
         <div>
-          <dt>Range major</dt>
-          <dd>{fmtNum(s.range_major)}</dd>
+          <dt>Диапазон (Range) по оси 1</dt>
+          <dd>{fmtNum(s.range_major, 0)}</dd>
         </div>
         <div>
-          <dt>Range intermediate</dt>
-          <dd>{fmtNum(s.range_intermediate)}</dd>
+          <dt>Диапазон (Range) по оси 2</dt>
+          <dd>{fmtNum(s.range_intermediate, 0)}</dd>
         </div>
         <div>
-          <dt>Range minor</dt>
-          <dd>{fmtNum(s.range_minor)}</dd>
+          <dt>Диапазон (Range) по оси 3</dt>
+          <dd>{fmtNum(s.range_minor, 0)}</dd>
         </div>
         {s.moi_strength != null ? (
           <div>
-            <dt>MOI strength</dt>
-            <dd>{fmtNum(s.moi_strength)}</dd>
+            <dt>
+              Сила анизотропии (MOI){" "}
+              <Hint text="Внутренний показатель выраженности направленной непрерывности по тензору моментов инерции. Чем выше, тем сильнее отличие направлений." />
+            </dt>
+            <dd>{fmtNum(s.moi_strength, 2)}</dd>
           </div>
         ) : null}
       </dl>
 
-      <h3 className="report-subheading">Orientation</h3>
-      <dl className="report-grid report-grid-wide">
-        <div>
-          <dt>Major axis XYZ</dt>
-          <dd className="report-mono">{fmtAxis(s.major_axis_xyz)}</dd>
-        </div>
-        <div>
-          <dt>Intermediate axis XYZ</dt>
-          <dd className="report-mono">{fmtAxis(s.intermediate_axis_xyz)}</dd>
-        </div>
-        <div>
-          <dt>Minor axis XYZ</dt>
-          <dd className="report-mono">{fmtAxis(s.minor_axis_xyz)}</dd>
-        </div>
-      </dl>
-
-      <h3 className="report-subheading">Continuity ellipsoid</h3>
+      <h3 className="report-subheading">Эллипсоид вариограммы (3D)</h3>
       <div className="report-ellipsoid-block">
         <ContinuityEllipsoidView
           orientationMatrix={s.orientation_matrix}

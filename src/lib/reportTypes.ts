@@ -107,9 +107,18 @@ export type AnalyzeReportData = {
   };
   conclusion_inputs: {
     anisotropy_type?: string | null;
+    variogram_model?: string | null;
+    nugget?: number | null;
+    sill?: number | null;
     range_major?: number | null;
     range_intermediate?: number | null;
     range_minor?: number | null;
+    major_azimuth_deg?: number | null;
+    major_dip_deg?: number | null;
+    intermediate_azimuth_deg?: number | null;
+    intermediate_dip_deg?: number | null;
+    minor_azimuth_deg?: number | null;
+    minor_dip_deg?: number | null;
     CV_RMSE?: number | null;
     CV_MAE?: number | null;
     prediction_coverage?: number | null;
@@ -133,6 +142,18 @@ export function fmtNum(v: number | null | undefined, digits = 4): string {
   return Number(v).toLocaleString("ru-RU", {
     maximumFractionDigits: digits,
   });
+}
+
+/** Fraction 0..1 → percentage string, e.g. 1 → «100%». */
+export function fmtPct(v: number | null | undefined, digits = 0): string {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+  const pct = Number(v) * 100;
+  return (
+    pct.toLocaleString("ru-RU", {
+      maximumFractionDigits: digits,
+      minimumFractionDigits: digits,
+    }) + "%"
+  );
 }
 
 export function fmtAxis(v: number[] | null | undefined): string {

@@ -1,18 +1,19 @@
 "use client";
 
 import type { AnalyzeReportData } from "@/lib/reportTypes";
-import { fmtDate, fmtNum } from "@/lib/reportTypes";
+import { fmtDate, fmtNum, fmtPct } from "@/lib/reportTypes";
 
 export default function ReportHeader({ data }: { data: AnalyzeReportData }) {
   const { header, kpi } = data;
   return (
     <header id="report-summary" className="report-header">
-      <p className="report-brand">ГОРИЗОНТ</p>
-      <h1 className="report-title">Отчёт по настройке пространственной оценки</h1>
+      <h1 className="report-title">
+        Отчёт по настройке интерполяции блочной модели
+      </h1>
 
       <dl className="report-meta">
         <div>
-          <dt>Run ID</dt>
+          <dt>Идентификатор расчёта</dt>
           <dd className="report-mono">{header.run_id}</dd>
         </div>
         <div>
@@ -20,21 +21,21 @@ export default function ReportHeader({ data }: { data: AnalyzeReportData }) {
           <dd>{header.filename ?? "—"}</dd>
         </div>
         <div>
-          <dt>Точек</dt>
+          <dt>Количество точек</dt>
           <dd>{fmtNum(header.n_points, 0)}</dd>
         </div>
         <div>
-          <dt>HoleID</dt>
+          <dt>Идентификатор скважины (HoleID)</dt>
           <dd>
             {header.has_hole_id === true
-              ? "present"
+              ? "есть"
               : header.has_hole_id === false
-                ? "absent"
+                ? "нет"
                 : "—"}
           </dd>
         </div>
         <div>
-          <dt>Тип CV</dt>
+          <dt>Схема кросс-валидации</dt>
           <dd>{header.cv_method ?? "—"}</dd>
         </div>
         <div>
@@ -45,17 +46,17 @@ export default function ReportHeader({ data }: { data: AnalyzeReportData }) {
 
       <div className="report-kpi">
         <div className="report-kpi-item">
-          <span className="report-kpi-label">CV RMSE</span>
-          <span className="report-kpi-value">{fmtNum(kpi.CV_RMSE)}</span>
+          <span className="report-kpi-label">RMSE на валидационных данных</span>
+          <span className="report-kpi-value">{fmtNum(kpi.CV_RMSE, 2)}</span>
         </div>
         <div className="report-kpi-item">
-          <span className="report-kpi-label">CV MAE</span>
-          <span className="report-kpi-value">{fmtNum(kpi.CV_MAE)}</span>
+          <span className="report-kpi-label">MAE на валидационных данных</span>
+          <span className="report-kpi-value">{fmtNum(kpi.CV_MAE, 2)}</span>
         </div>
         <div className="report-kpi-item">
-          <span className="report-kpi-label">Prediction coverage</span>
+          <span className="report-kpi-label">Процент успешных оценок</span>
           <span className="report-kpi-value">
-            {fmtNum(kpi.prediction_coverage)}
+            {fmtPct(kpi.prediction_coverage)}
           </span>
         </div>
       </div>

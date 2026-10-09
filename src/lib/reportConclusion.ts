@@ -1,82 +1,108 @@
+import { anisoTypeLabel, variogramModelLabel } from "./reportLabels";
 import type { AnalyzeReportData } from "./reportTypes";
-import { fmtNum } from "./reportTypes";
+import { fmtNum, fmtPct } from "./reportTypes";
 
-export type ConclusionBlock = {
+export type RecommendedGroup = {
   title: string;
-  body: string;
-  tone?: "default" | "warn";
+  items: { label: string; value: string }[];
 };
+
+export type ConclusionModel = {
+  lead: string;
+  groups: RecommendedGroup[];
+  notes: string[];
+  hasWarn: boolean;
+};
+
+function axisAngle(
+  az: number | null | undefined,
+  dip: number | null | undefined,
+): string {
+  if (az == null && dip == null) return "—";
+  return `азимут ${fmtNum(az, 1)}°, погружение ${fmtNum(dip, 1)}°`;
+}
 
 export function buildConclusion(
   inputs: AnalyzeReportData["conclusion_inputs"],
-): ConclusionBlock[] {
-  const blocks: ConclusionBlock[] = [];
+): ConclusionModel {
+  const type = anisoTypeLabel(inputs.anisotropy_type);
 
-  const rMaj = inputs.range_major;
-  const rInt = inputs.range_intermediate;
-  const rMin = inputs.range_minor;
-  const type = inputs.anisotropy_type ?? "—";
+  const groups: RecommendedGroup[] = [
+    {
+      title: "Вариограмма",
+      items: [
+        { label: "Тип анизотропии", value: type },
+        {
+          label: "Модель вариограммы",
+          value: variogramModelLabel(inputs.variogram_model),
+        },
+        {
+          label: "Эффект самородка (nugget)",
+          value: fmtNum(inputs.nugget, 3),
+        },
+        {
+          label: "Порог (sill)",
+          value: fmtNum(inputs.sill, 3),
+        },
+        {
+          label: "Диапазоны по осям 1 / 2 / 3",
+          value: `${fmtNum(inputs.range_major, 0)} / ${fmtNum(inputs.range_intermediate, 0)} / ${fmtNum(inputs.range_minor, 0)}`,
+        },
+        {
+          label: "Ось 1 (главная)",
+          value: axisAngle(inputs.major_azimuth_deg, inputs.major_dip_deg),
+        },
+        {
+          label: "Ось 2 (промежуточная)",
+          value: axisAngle(
+            inputs.intermediate_azimuth_deg,
+            inputs.intermediate_dip_deg,
+          ),
+        },
+        {
+          label: "Ось 3 (малая)",
+          value: axisAngle(inputs.minor_azimuth_deg, inputs.minor_dip_deg),
+        },
+      ],
+    },
+    {
+      title: "Область поиска",
+      items: [
+        {
+          label: "Радиусы осей 1 / 2 / 3",
+          value: `${fmtNum(inputs.R_major, 0)} / ${fmtNum(inputs.R_inter, 0)} / ${fmtNum(inputs.R_minor, 0)}`,
+        },
+        {
+          label: "Мин. / макс. кол-во точек",
+          value: `${fmtNum(inputs.Nmin, 0)} / ${fmtNum(inputs.Nmax, 0)}`,
+        },
+      ],
+    },
+  ];
 
-  let ratioText = "";
-  if (
-    rMaj != null &&
-    rMin != null &&
-    Number(rMin) > 0 &&
-    Number.isFinite(Number(rMaj) / Number(rMin))
-  ) {
-    const ratio = Number(rMaj) / Number(rMin);
-    ratioText = ` Отношение основных диапазонов (major/minor) составляет ${fmtNum(ratio, 2)}.`;
-  }
-
-  blocks.push({
-    title: "Пространственная структура",
-    body:
-      `Для набора данных определён тип анизотропии ${type} ` +
-      `с ranges ${fmtNum(rMaj)} / ${fmtNum(rInt)} / ${fmtNum(rMin)} ` +
-      `(variogram / continuity ellipsoid).` +
-      ratioText +
-      ` Параметры пространственной структуры фиксируются на этапе анализа анизотропии и не изменяются при оптимизации поискового соседства.`,
-  });
-
-  blocks.push({
-    title: "Настройка поискового соседства",
-    body:
-      `Параметры поискового соседства подобраны по пространственной кросс-валидации: ` +
-      `R = ${fmtNum(inputs.R_major)} / ${fmtNum(inputs.R_inter)} / ${fmtNum(inputs.R_minor)}, ` +
-      `Nmin–Nmax = ${fmtNum(inputs.Nmin, 0)}–${fmtNum(inputs.Nmax, 0)}. ` +
-      `Размер search neighbourhood определяется отдельно от variogram ellipsoid.`,
-  });
-
-  blocks.push({
-    title: "Результаты cross-validation",
-    body:
-      `Полученный набор параметров обеспечивает CV RMSE ${fmtNum(inputs.CV_RMSE)}, ` +
-      `CV MAE ${fmtNum(inputs.CV_MAE)} при prediction coverage ${fmtNum(inputs.prediction_coverage)}. ` +
-      `Значения RMSE интерпретируются только в контексте масштаба данных и постановки задачи; ` +
-      `отдельная качественная оценка «хорошо/плохо» без этого контекста не приводится.`,
-  });
-
-  const limitations: string[] = [];
-  limitations.push(
-    "Отчёт основан на сохранённых артефактах текущего прогона и не заменяет инженерную экспертизу по месторождению.",
-  );
+  const notes: string[] = [];
   if (inputs.any_near_bound) {
-    limitations.push(
-      "Один или несколько оптимизированных параметров расположены вблизи границы заданного диапазона поиска. Рекомендуется дополнительная проверка расширенного диапазона.",
+    notes.push(
+      "Один или несколько подобранных параметров находятся у края заданного диапазона поиска.",
     );
   }
   if (inputs.coverage_below_threshold) {
     const thr = inputs.coverage_threshold ?? 0.97;
-    limitations.push(
-      `Prediction coverage ниже порога ${fmtNum(thr, 2)}. Рекомендуется проверить геометрию поиска и покрытие пространства наблюдениями.`,
+    notes.push(
+      `Процент успешных оценок ниже порога ${fmtPct(thr)} — проверьте геометрию области поиска.`,
     );
   }
+  notes.push(
+    "Параметры носят рекомендательный характер и не заменяют экспертизу по месторождению.",
+  );
 
-  blocks.push({
-    title: "Ограничения",
-    body: limitations.join(" "),
-    tone: inputs.any_near_bound || inputs.coverage_below_threshold ? "warn" : "default",
-  });
-
-  return blocks;
+  return {
+    lead:
+      "Рекомендуемые параметры пространственной оценки получены по результатам автоматизированного анализа и пространственной кросс-валидации. Ниже приведены параметры, рекомендуемые для проверки и последующего использования при настройке интерполяции в ГГИС.",
+    groups,
+    notes,
+    hasWarn: Boolean(
+      inputs.any_near_bound || inputs.coverage_below_threshold,
+    ),
+  };
 }

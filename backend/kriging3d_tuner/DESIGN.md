@@ -1,14 +1,14 @@
 # kriging3d_tuner — Design
 
-Independent project: **ANISO Ordinary Kriging + Optuna** in 3D.
+Independent project: **ANISO Ordinary Kriging / Anisotropic IDW + Optuna** in 3D.
 
 Input: drillhole / sample points `X,Y,Z,Value` plus a **fixed** continuity
 ellipsoid from [`anisotropy3d`](../anisotropy3d/) (`result.json` /
-`aniso_candidate`). Output: best **search neighbourhood** hyperparameters and
-CV metrics.
+`aniso_candidate`). Output: best **search neighbourhood** hyperparameters
+(and IDW power), CV / OOF metrics, and method-specific reports.
 
-This document is the source of truth for v0. Implementation follows it
-mechanically; do not invent soft rescues, ISO bake-offs, or VG re-tuning.
+This document is the source of truth for the **current** product path. Detail
+on sector / octant neighbour rules also lives in [`OCTANT_NOTES.md`](OCTANT_NOTES.md).
 
 ---
 
@@ -19,19 +19,26 @@ mechanically; do not invent soft rescues, ISO bake-offs, or VG re-tuning.
 ```text
 CSV (X,Y,Z,Value [+HoleID]) + fixed anisotropy ellipsoid
   → build CV folds once
-  → Optuna over search neighbourhood only
-  → best ANISO OK configuration
-  → best_params.json + trials.csv
+  → Optuna over search neighbourhood (+ IDW power; optional sectors/octants)
+  → best configuration for method ∈ {ordinary_kriging, anisotropic_idw}
+  → best_params.json + trials.csv (+ IDW REPORT_idw.md / OOF artifacts)
 ```
 
-### Non-goals (v0)
+Production API uses:
 
-- Do **not** modify `anisotropy3d`.
-- Do **not** re-estimate variogram model / nugget / sill / three ranges / orientation.
-- Do **not** compare ISO vs ANISO candidates (that comes later in a separate pipeline).
-- Do **not** run kriging on a prediction grid (CV OOF only).
-- Do **not** soft-fill empty search neighbourhoods with nearest neighbours outside the ellipsoid.
-- Do **not** use PyKrige / GSTools; own NumPy OK.
+- OK → [`config.yaml`](config.yaml) (`ordinary_kriging`, coverage-gated RMSE)
+- IDW → [`config_idw.yaml`](config_idw.yaml) (`anisotropic_idw`, loss `j`, Micromine
+  sector search **auto** in Optuna)
+
+### Non-goals
+
+- Do **not** re-estimate variogram model / nugget / sill / three ranges / orientation
+  inside this tuner (they stay frozen from anisotropy3d).
+- Do **not** soft-fill empty search neighbourhoods with nearest neighbours
+  **outside** the ellipsoid (NaN / unevaluated OOF stays missing).
+- Do **not** use PyKrige / GSTools; own NumPy OK and IDW.
+- Optional multipass / sequential-J modes exist in code for experiments; the
+  production IDW path is **single-pass** (+ optional `coverage_fill` second pass).
 
 ---
 
@@ -39,9 +46,9 @@ CSV (X,Y,Z,Value [+HoleID]) + fixed anisotropy ellipsoid
 
 | Fixed (from anisotropy3d) | Tuned (Optuna) |
 |---------------------------|----------------|
-| `variogram_model` (v0: **spherical** only) | `R_major` |
-| `nugget`, `sill` (partial sill) | `K_inter`, `K_minor` |
-| `range_major`, `range_intermediate`, `range_minor` | `Nmin`, `Nmax` |
+| `variogram_model` (product: **spherical**) | `R_major` |
+| `nugget`, `sill` (partial sill) — used by OK | `K_inter`, `K_minor` |
+| `range_major`, `range_intermediate`, `range_minor` | see method branches below |
 | `orientation_matrix` \(3\times 3\) (columns maj, int, min) | derived: `R_inter`, `R_minor` |
 
 Derived search radii:
@@ -54,12 +61,28 @@ R_{\mathrm{minor}} = R_{\mathrm{major}} \cdot K_{\mathrm{minor}}.
 Hard constraints:
 
 \[
-1 \ge K_{\mathrm{inter}} \ge K_{\mathrm{minor}} > 0,\qquad
-N_{\min} \le N_{\max}.
+1 \ge K_{\mathrm{inter}} \ge K_{\mathrm{minor}} > 0.
 \]
 
 **Variogram ellipsoid ≠ search ellipsoid.** Same orientation; different semi-axes.
 Search radii are **not** forced equal to variogram ranges.
+
+### 2.1 Method branches (what Optuna suggests)
+
+| Branch | Parameters |
+|--------|------------|
+| `octant_search` / `sector_search` = **false** | `R_major`, `K_*`, **`Nmin`**, **`Nmax`** (+ `power` for IDW) |
+| OK + octants **true** | `R_major`, `K_*`, `MINOCT`, `MINPEROC`, `MAXPEROC` (`n_sectors=8` fixed, Datamine-style). **`Nmin`/`Nmax` not suggested** — implied |
+| IDW + sectors **true** | same + **`n_sectors ∈ {4, 8, 16}`**, Micromine `discard_underfilled`. **`Nmin`/`Nmax` not suggested** — implied |
+
+Implied when sector/octant search is on:
+
+\[
+N_{\min} = \mathrm{MINOCT}\times\mathrm{MINPEROC},\qquad
+N_{\max} = n_{\mathrm{sectors}}\times\mathrm{MAXPEROC}.
+\]
+
+IDW also suggests continuous `power` \(p\) in `[power_min, power_max]` (prod default `[0.5, 6]`).
 
 ---
 
@@ -79,7 +102,7 @@ Optional:
 | Column | Role |
 |--------|------|
 | `HoleID` | group id for GroupKFold / leave-holes-out |
-| `DomainID` | reserved; **ignored in v0** (no domain loop) |
+| `DomainID` | reserved; ignored in the default path |
 
 Drop rows with non-finite coords or value. Require `n ≥ n_min_points` (default 30).
 
@@ -96,15 +119,16 @@ Required fields:
 
 | Field | Shape | Notes |
 |-------|-------|-------|
-| `variogram_model` | str | v0: must be `"spherical"` (else error) |
-| `nugget` | float | ≥ 0 |
-| `sill` | float | partial sill > 0 |
+| `variogram_model` | str | product path: `"spherical"` |
+| `nugget` | float | ≥ 0 (OK) |
+| `sill` | float | partial sill > 0 (OK) |
 | `range_major` | float | \(a_{\mathrm{maj}} > 0\) |
 | `range_intermediate` | float | \(a_{\mathrm{int}} > 0\) |
 | `range_minor` | float | \(a_{\mathrm{min}} > 0\) |
 | `orientation_matrix` | \(3\times 3\) list | columns = maj, int, min |
 
-Optional echo (not required for OK): `major_axis_xyz`, etc.
+IDW uses orientation + search geometry; variogram ranges still set the Optuna
+`R_major` scale via `r_lo`/`r_hi`. Nugget/sill are unused by IDW weights.
 
 Assert \(a_{\mathrm{maj}} \ge a_{\mathrm{int}} \ge a_{\mathrm{min}} > 0\) within a small tolerance;
 if mildly unsorted, sort **linked** (range, column) together (same rule as anisotropy3d).
@@ -124,8 +148,8 @@ Match anisotropy3d:
 \mathbf{x}' = Q^\top \Delta\mathbf{x} = (x', y', z')^\top.
 \]
 
-- Reporting azimuth/dip (if ever printed): azimuth 0°=+X, 90°=+Y CCW; dip 0°=horizontal, +90°=+Z.
-  Not used inside OK / Optuna.
+- Reporting azimuth/dip (if printed): azimuth 0°=+X, 90°=+Y CCW; dip 0°=horizontal, +90°=+Z.
+  Not used inside OK / IDW / Optuna.
 
 ---
 
@@ -134,13 +158,12 @@ Match anisotropy3d:
 ```text
 neighbours ──► hard SEARCH ellipsoid (R_maj, R_int, R_min)
                     │
-                    │ keep inside; cap to Nmax by d_search
+                    │ keep inside; optional sector/octant filter; Nmax
                     ▼
-               Ordinary Kriging
+          Ordinary Kriging  OR  Anisotropic IDW
                     │
-                    │ cov / γ distance via VARIOGRAM ellipsoid
-                    ▼
-            (a_maj, a_int, a_min) + nugget/sill
+         OK: cov / γ via VARIOGRAM ellipsoid
+         IDW: weights from d_search (power p)
 ```
 
 ### 5.1 Search ellipsoid (HARD)
@@ -154,7 +177,7 @@ Point \(j\) is inside the search neighbourhood of target \(0\) iff
 \le 1.
 \]
 
-Anisotropic **search distance** (for ranking when capping `Nmax`):
+Anisotropic **search distance** (ranking / IDW weights):
 
 \[
 d_{\mathrm{search}}
@@ -165,7 +188,7 @@ d_{\mathrm{search}}
 }.
 \]
 
-### 5.2 Variogram / covariance metric
+### 5.2 Variogram / covariance metric (OK only)
 
 Same \(Q\); lag for the model uses **variogram** semi-axes:
 
@@ -189,24 +212,11 @@ c, & h' \ge 1.
 \end{cases}
 \]
 
-Covariance used in OK (stationary):
-
 \[
 C(h') = c - \gamma(h')
 \quad\text{(off-diagonal)},\qquad
-C(0) = c
-\quad\text{on the covariogram; nugget handled as below}.
+K_{ii} = c + n_0,\quad n_0=\texttt{nugget}.
 \]
-
-**Nugget:** OK covariance matrix between distinct points \(i\neq j\):
-
-\[
-K_{ij} = C(h'_{ij}),
-\qquad
-K_{ii} = c + n_0
-\]
-
-where \(n_0 =\) `nugget`, \(c =\) `sill` (partial). Cross-covariances target↔data use \(C(h')\) without adding nugget to off-diagonals (standard OK).
 
 ---
 
@@ -215,19 +225,29 @@ where \(n_0 =\) `nugget`, \(c =\) `sill` (partial). Cross-covariances target↔d
 For each prediction location:
 
 1. Collect all **training** points with \(d_{\mathrm{search}}^2 \le 1\).
-2. If count \(< N_{\min}\): prediction = **invalid** (`NaN`). **No** fallback to nearest points outside the ellipsoid.
-3. If count \(> N_{\max}\): keep the \(N_{\max}\) smallest \(d_{\mathrm{search}}\) (stable tie-break: lower original index).
-4. Else: use all inside points.
+2. If `octant_search` / sector search is **off**:
+   - If count \(< N_{\min}\): prediction = **invalid** (`NaN`). **No** fallback outside the ellipsoid.
+   - If count \(> N_{\max}\): keep the \(N_{\max}\) smallest \(d_{\mathrm{search}}\) (stable tie-break: lower original index).
+3. If sector/octant search is **on**:
+   - Assign sector ids in the principal frame (`n_sectors` ∈ {4, 8, 16}; see OCTANT_NOTES).
+   - Apply `MINOCT` / `MINPEROC` / `MAXPEROC`, then global implied `Nmax` with MINPEROC-protected trim.
+   - Micromine IDW: underfilled sectors (`< MINPEROC`) contribute **no** samples.
+   - Datamine OK octants: underfilled octants may still contribute up to `MAXPEROC`.
+   - If constraints cannot be met → empty neighbourhood → `NaN`.
+4. Else: use selected points.
 
-Never expand the ellipsoid, never switch to Euclidean kNN outside it.
+Never expand the ellipsoid in the single-pass path; never switch to Euclidean kNN outside it.
+(`coverage_fill` may re-tune a **second** search with an expanded Optuna `R` range for remaining OOF holes only.)
 
 ---
 
-## 7. Ordinary Kriging (3D)
+## 7. Estimators
+
+### 7.1 Ordinary Kriging (3D)
 
 Classical OK with Lagrange multiplier \(\mu\).
 
-Let \(n\) = neighbourhood size after hard mask + `Nmax` cap. Build
+Let \(n\) = neighbourhood size after hard mask (+ sectors) + `Nmax` cap. Build
 
 \[
 \begin{bmatrix}
@@ -251,7 +271,17 @@ Solve with `numpy.linalg.solve`; on failure use `lstsq`. Predict \(\hat{z} = \bo
 
 If \(n < N_{\min}\) or matrix is unusable → `NaN`.
 
-Implementation note: same spirit as `aniso_ok_tuner` own NumPy OK, extended to 3D dual metrics (search vs γ). No PyKrige/GSTools.
+### 7.2 Anisotropic IDW
+
+Same hard search neighbourhood (and optional Micromine sectors). Weights:
+
+\[
+w_i \propto d_{\mathrm{search},i}^{-p}
+\quad\text{(with a small \(\varepsilon\) floor on \(d\))},\qquad
+\hat{z} = \frac{\sum_i w_i z_i}{\sum_i w_i}.
+\]
+
+No variogram system. `power` \(p\) is Optuna-tuned. Same `Nmin` / empty → `NaN` rule.
 
 ---
 
@@ -265,7 +295,7 @@ All trials reuse the **same** fold list.
 
 - Groups = unique `HoleID`.
 - Use `sklearn.model_selection.GroupKFold` with `n_splits` from config (default **5**).
-- If `n_holes < n_splits`: set `n_splits = n_holes` (leave-one-hole-out when `n_holes` small). Require `n_holes ≥ 2`.
+- If `n_holes < n_splits`: set `n_splits = n_holes`. Require `n_holes ≥ 2`.
 - Each fold: train = all points whose hole ∉ test holes; test = points of held-out holes.
 
 **If `HoleID` is absent:**
@@ -273,11 +303,9 @@ All trials reuse the **same** fold list.
 - **3D spatial block CV** on the axis-aligned bounding box of `(X,Y,Z)`.
 - Partition into `grid_nx × grid_ny × grid_nz` equal cells (defaults **3 × 3 × 2**).
 - Leave-one-block-out: each non-empty cell is a test fold once; empty cells skipped.
-- If fewer than 2 non-empty blocks → error (data too degenerate for block CV).
+- If fewer than 2 non-empty blocks → error.
 
 ### 8.2 Metrics (pooled, not mean-of-folds)
-
-Over all OOF targets across folds:
 
 | Symbol | Definition |
 |--------|------------|
@@ -289,14 +317,15 @@ Over all OOF targets across folds:
 | `CV_MAE` | \(\mathrm{mean}|\hat{z}-z|\) over **valid** only |
 
 **Do not** optimize the average of per-fold RMSE. Always pool residuals first.
+Missing forecasts stay **NaN** (never zero-filled).
 
-### 8.3 Optuna objective (finite, coverage-penalized)
+### 8.3 Objectives
 
-Defaults (config names in parentheses):
+**Ordinary Kriging (default `config.yaml`):** coverage-gated RMSE.
 
-| Name | Default | Role |
-|------|---------|------|
-| `coverage_min` | `0.90` | soft target coverage |
+| Name | Prod default | Role |
+|------|--------------|------|
+| `coverage_min` | `0.97` | soft target coverage |
 | `coverage_penalty` | `1.0e6` | weight on coverage shortfall |
 | `empty_rmse_fallback` | `1.0e6` | if \(n_{\mathrm{valid}} = 0\) |
 
@@ -310,15 +339,27 @@ Defaults (config names in parentheses):
 \end{cases}
 \]
 
-Always return a finite float so TPE keeps learning. Log `CV_RMSE`, `CV_MAE`, coverage, \(n_{\mathrm{invalid}}\) per trial even when penalized.
+**Anisotropic IDW (prod `config_idw.yaml`):** minimize pooled **J** (loss `j`):
+squared error on estimated OOF points + fold λ penalties on unevaluated points
+(see `multipass_j` helpers / objective). Coverage gate is **off** for that loss
+(`coverage_min=0`, `coverage_penalty=0`); coverage is still logged.
 
-Best trial for reporting = trial with **minimal objective**. Reported `CV_RMSE` / `CV_MAE` / `prediction_coverage` in `best_params.json` are the **unpenalized** pooled metrics of that trial (not the objective scalar).
+Best trial = minimal objective. `best_params.json` stores unpenalized pooled
+`CV_RMSE` / `CV_MAE` / `prediction_coverage` of that trial plus search / sector fields.
+
+### 8.4 Optional `coverage_fill` (second pass)
+
+If enabled and pass-1 OOF coverage `< trigger_below`, run a second Optuna study
+(RMSE + high coverage gate, optionally expanded `R` bounds) that only fills
+still-missing OOF targets. Pass-1 estimates are **not** overwritten. Reported in
+API/UI as coverage-fill passes.
 
 ---
 
 ## 9. Optuna search space
 
 Sampler: `TPESampler` (seed from config). `n_trials` from CLI/config.
+`octants.force_octant_search` may lock the sector/octant categorical; absent → auto.
 
 ### 9.1 Continuous / integer suggestions
 
@@ -328,23 +369,13 @@ Let \(R_0 = a_{\mathrm{maj}}\) (variogram `range_major`).
 |-----------|------|----------------|
 | `R_major` | float | \([R_0\cdot r_{\mathrm{lo}},\; R_0\cdot r_{\mathrm{hi}}]\) with `r_lo=0.5`, `r_hi=3.0` |
 | `K_inter` | float | \([k_{\min},\; 1]\) with `k_min=0.05` |
-| `K_minor` | float | \([k_{\min},\; 1]\) |
-| `Nmin` | int | `[nmin_lo, nmin_hi]` default `[4, 12]` |
-| `Nmax` | int | `[nmax_lo, nmax_hi]` default `[8, 64]` |
+| `K_minor` | float | \([k_{\min},\; K_{\mathrm{inter}}]\) |
+| `Nmin` / `Nmax` | int | only when sector/octant search is **off** |
+| `MINOCT`, `MINPEROC`, `MAXPEROC` | int | when sector/octant search is **on** |
+| `n_sectors` | categorical `{4,8,16}` | IDW sector branch only |
+| `power` | float | IDW only |
 
-Enforce constraints **inside** the trial:
-
-1. Suggest `K_inter`, then suggest `K_minor` in `[k_min, K_inter]` (or suggest both and reject / prune if `K_minor > K_inter`).
-2. Suggest `Nmax`, then `Nmin` in `[nmin_lo, min(nmin_hi, Nmax)]` (or prune if `Nmin > Nmax`).
-
-Preferred: **ordered sampling** so every trial is feasible (no waste).
-
-Derived for evaluation and logging:
-
-\[
-R_{\mathrm{inter}} = R_{\mathrm{major}} K_{\mathrm{inter}},\qquad
-R_{\mathrm{minor}} = R_{\mathrm{major}} K_{\mathrm{minor}}.
-\]
+Preferred: **ordered / conditional sampling** so every trial is feasible.
 
 ### 9.2 What is NOT tuned
 
@@ -356,76 +387,52 @@ R_{\mathrm{minor}} = R_{\mathrm{major}} K_{\mathrm{minor}}.
 
 ### 10.1 `best_params.json`
 
-```json
-{
-  "R_major": 0.0,
-  "R_inter": 0.0,
-  "R_minor": 0.0,
-  "K_inter": 0.0,
-  "K_minor": 0.0,
-  "Nmin": 0,
-  "Nmax": 0,
-  "CV_RMSE": 0.0,
-  "CV_MAE": 0.0,
-  "prediction_coverage": 0.0,
-  "objective": 0.0,
-  "n_trials": 0,
-  "best_trial_number": 0,
-  "cv": {
-    "method": "group_kfold | spatial_block_3d",
-    "n_folds": 0,
-    "n_splits_requested": 0
-  },
-  "variogram_fixed": {
-    "variogram_model": "spherical",
-    "nugget": 0.0,
-    "sill": 0.0,
-    "range_major": 0.0,
-    "range_intermediate": 0.0,
-    "range_minor": 0.0,
-    "orientation_matrix": [[], [], []]
-  },
-  "search_space": {},
-  "seed": 0
-}
-```
+Includes method, radii, `Nmin`/`Nmax` (suggested or implied), optional
+`octant_search` / `sector_search`, `n_sectors`, `MINOCT`/`MINPEROC`/`MAXPEROC`,
+IDW `power`, metrics, `variogram_fixed`, `search_space`, seed, and coverage_fill
+summary when used.
 
 ### 10.2 `trials.csv`
 
-One row per trial. Minimum columns:
+One row per trial. Includes at least:
 
-`trial`, `R_major`, `K_inter`, `K_minor`, `R_inter`, `R_minor`, `Nmin`, `Nmax`,
-`objective`, `CV_RMSE`, `CV_MAE`, `prediction_coverage`, `n_valid`, `n_invalid`, `n_tgt`.
+`trial`, `method`, `power` (IDW), `octant_search` / `sector_search`, `n_sectors`,
+`R_major`, `K_inter`, `K_minor`, `R_inter`, `R_minor`, `Nmin`, `Nmax`,
+`MINOCT`, `MINPEROC`, `MAXPEROC`, `objective`, `CV_RMSE`, `CV_MAE`,
+`prediction_coverage`, `n_valid`, `n_invalid`, `n_tgt`.
 
-Flush periodically (e.g. every 25 trials) so long runs are resumable for inspection.
+When sectors are on, `Nmin`/`Nmax` columns are the **implied** values (also in
+trial user_attrs), not independent Optuna params.
 
-### 10.3 Optional (v0 allowed but not required)
+### 10.3 Method reports
 
-- `_run_config.yaml` copy of resolved config
-- console log of best-so-far
+- IDW: `REPORT_idw.md` with an explicit **Sector search ON/OFF** block.
+- Multipass / J experimental modes: their own `REPORT_*.md` under the run dir.
+- Product UI (`backend/api/report.py` + frontend) surfaces sectorality when enabled.
 
 ---
 
-## 11. Module map (future implementation)
+## 11. Module map
 
 ```text
 kriging3d_tuner/
-  DESIGN.md                 ← this document
-  pyproject.toml            (later)
-  config.yaml               (later)
-  README.md                 (later)
+  DESIGN.md
+  OCTANT_NOTES.md
+  config.yaml / config_idw.yaml
   src/kriging3d_tuner/
-    models.py               # dataclasses: AnisotropyFixed, SearchParams, Fold, ...
-    geometry.py             # Qᵀ Δx; hard ellipsoid mask; d_search; h'
-    kriging.py              # 3D OK given fixed VG + SearchParams
-    cv.py                   # build_folds(...); pooled_oof_metrics(...)
-    search_space.py         # suggest feasible (R_major, K_*, N*)
-    objective.py            # trial → objective + metrics dict
-    pipeline.py             # load → folds → Optuna study → write artifacts
-    cli.py                  # --data --anisotropy --config --out-dir --trials
+    models.py          # SearchParams (+ n_sectors, discard_underfilled), …
+    geometry.py        # Qᵀ Δx; hard ellipsoid; d_search; h'
+    kriging.py         # OK + sector/octant neighbour select
+    idw.py             # anisotropic IDW
+    cv.py / oof_store.py / diagnostics.py
+    search_space.py    # conditional Optuna suggest (+ implied Nmin/Nmax)
+    objective.py       # RMSE gate or J; IDW power; variable sectors
+    coverage_fill.py   # optional pass-2 fill
+    multipass.py / multipass_j.py   # experimental modes
+    pipeline.py / cli.py
 ```
 
-### Future CLI sketch
+### CLI
 
 ```bash
 python -m kriging3d_tuner \
@@ -434,62 +441,66 @@ python -m kriging3d_tuner \
   --config config.yaml \
   --out-dir results/run \
   --trials 200
+
+python -m kriging3d_tuner ... --method anisotropic_idw --config config_idw.yaml
 ```
 
 ---
 
 ## 12. Default config knobs (names locked)
 
+OK (`config.yaml`) — coverage-gated RMSE; octant search auto (8 only when on):
+
 ```yaml
 n_min_points: 30
 seed: 42
-
-cv:
-  n_splits: 5                 # GroupKFold when HoleID present
-  grid_nx: 3                  # spatial_block_3d
-  grid_ny: 3
-  grid_nz: 2
-
+method: ordinary_kriging
+cv: { n_splits: 5, grid_nx: 3, grid_ny: 3, grid_nz: 2 }
 objective:
-  coverage_min: 0.90
+  coverage_min: 0.97
   coverage_penalty: 1.0e6
   empty_rmse_fallback: 1.0e6
-
 search_space:
-  r_lo: 0.5                   # R_major / range_major
+  r_lo: 0.5
   r_hi: 3.0
   k_min: 0.05
   nmin_lo: 4
   nmin_hi: 12
-  nmax_lo: 8
+  nmax_lo: 4
   nmax_hi: 64
-
-optuna:
-  n_trials: 200
-  n_startup_trials: null      # null → max(10, 0.3 * n_trials)
+  minoct_lo: 1
+  minoct_hi: 4
+  minperoc_lo: 1
+  minperoc_hi: 3
+  maxperoc_lo: 1
+  maxperoc_hi: 4
 ```
 
+IDW (`config_idw.yaml`) — loss `j`; sector search auto `{4,8,16}`;
+`coverage_fill.enabled: true` for optional pass-2.
+
 ---
 
-## 13. Out of scope for v0 (explicit)
+## 13. Out of scope (still)
 
-- ISO Ordinary Kriging path and ISO/ANISO holdout comparison
+- ISO Ordinary Kriging path and ISO/ANISO holdout bake-offs inside this package
 - Tuning nugget / sill / ranges / orientation
-- Soft geometric anisotropy “compress one axis” shortcuts that collapse search and γ into one metric
-- Empty-ellipsoid rescue (4-nearest, etc.) as in 2D `aniso_ok_tuner`
+- Soft geometric anisotropy that collapses search and γ into one metric
+- Empty-ellipsoid rescue (kNN outside the ellipsoid)
 - Domain-wise loops on `DomainID`
 - Universal / indicator kriging, trend UK
-- Parallel fold evaluation (optional later)
-- Writing prediction grids / block models
+- Claiming bit-for-bit Micromine / Datamine ESTIMA parity (see OCTANT_NOTES)
 
 ---
 
-## 14. Acceptance checklist (when code lands)
+## 14. Acceptance checklist
 
 1. Search uses hard ellipsoid only; `< Nmin` → NaN; no outside-kNN fill.
 2. OK lag uses variogram \((a_{\mathrm{maj}},a_{\mathrm{int}},a_{\mathrm{min}})\); neighbour mask uses \((R_{\mathrm{maj}},R_{\mathrm{int}},R_{\mathrm{min}})\).
-3. Orientation frozen from input `orientation_matrix`.
-4. Folds built once; all trials share them.
-5. Objective = pooled RMSE + coverage penalty (not mean fold RMSE).
-6. `best_params.json` and `trials.csv` match §10.
-7. `anisotropy3d` tree untouched.
+3. IDW uses \(d_{\mathrm{search}}\) + power; same search / sector plumbing as OK.
+4. When sector search is on, Optuna does **not** sample `Nmin`/`Nmax`; they are implied.
+5. IDW may choose `n_sectors ∈ {4,8,16}`; OK octants stay 8.
+6. Orientation frozen from input `orientation_matrix`.
+7. Folds built once; all trials share them.
+8. Objectives match §8.3; missing OOF stay NaN.
+9. Reports / API show sector ON/OFF and sector params when enabled.

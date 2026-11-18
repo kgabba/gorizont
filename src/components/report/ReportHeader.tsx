@@ -39,10 +39,30 @@ export default function ReportHeader({ data }: { data: AnalyzeReportData }) {
           <dd>{header.cv_method ?? "—"}</dd>
         </div>
         <div>
+          <dt>Метод интерполяции</dt>
+          <dd>{header.method_label ?? header.method ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>Число проходов подбора</dt>
+          <dd>
+            {kpi.coverage_fill_triggered
+              ? "2 (основной + дозаполнение)"
+              : fmtNum(kpi.n_passes ?? 1, 0)}
+          </dd>
+        </div>
+        <div>
           <dt>Дата расчёта</dt>
           <dd>{fmtDate(header.created_at)}</dd>
         </div>
       </dl>
+
+      {kpi.coverage_fill_triggered ? (
+        <p className="report-header-note">
+          После первого прохода покрытие было неполным — выполнен второй проход
+          с RMSE и требованием покрытия 100%. Итоговые RMSE/MAE ниже — по
+          объединённым OOF-точкам обоих проходов.
+        </p>
+      ) : null}
 
       <div className="report-kpi">
         <div className="report-kpi-item">

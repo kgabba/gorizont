@@ -1,8 +1,8 @@
-"""ISO / AXIAL / TRIAXIAL classification."""
+"""ISO / AXIAL / TRIAXIAL classification (only on reliable ranges)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 
 def classify_anisotropy(
@@ -10,10 +10,40 @@ def classify_anisotropy(
     range_intermediate: float,
     range_minor: float,
     cfg: dict[str, Any],
+    *,
+    axis_statuses: Sequence[str] | None = None,
+    ranges_reliable: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """Classify anisotropy type from three ranges.
+
+    If ranges are not all ``reliable``, returns ``UNCLASSIFIED`` — do not
+    invent AXIAL/TRIAXIAL from non-identifiable distances.
+    """
     ccfg = cfg.get("classification") or {}
     iso_max = float(ccfg.get("ratio_iso_max", 1.3))
     eq_max = float(ccfg.get("ratio_equal_max", 1.3))
+
+    notes: list[str] = []
+    if axis_statuses is not None:
+        if any(s != "reliable" for s in axis_statuses):
+            notes.append(
+                "classification_skipped: not all axis ranges reliable "
+                f"(statuses={list(axis_statuses)})"
+            )
+            return "UNCLASSIFIED", {
+                "major_intermediate_ratio": float("nan"),
+                "major_minor_ratio": float("nan"),
+                "intermediate_minor_ratio": float("nan"),
+                "notes": notes,
+            }
+    elif ranges_reliable is False:
+        notes.append("classification_skipped: ranges_reliable=False")
+        return "UNCLASSIFIED", {
+            "major_intermediate_ratio": float("nan"),
+            "major_minor_ratio": float("nan"),
+            "intermediate_minor_ratio": float("nan"),
+            "notes": notes,
+        }
 
     a = max(float(range_major), 1e-12)
     b = max(float(range_intermediate), 1e-12)
@@ -22,7 +52,6 @@ def classify_anisotropy(
     r_mn = a / c
     r_in = b / c
 
-    notes: list[str] = []
     if r_mi < eq_max:
         notes.append("maj≈int plane: orientation within plane ill-defined")
     if r_in < eq_max:

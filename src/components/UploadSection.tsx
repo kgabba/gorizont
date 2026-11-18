@@ -128,6 +128,9 @@ export default function UploadSection() {
   const [error, setError] = useState<string | null>(null);
   const [inspect, setInspect] = useState<InspectResponse | null>(null);
   const [mapping, setMapping] = useState<MappingState | null>(null);
+  const [method, setMethod] = useState<"ordinary_kriging" | "anisotropic_idw">(
+    "ordinary_kriging",
+  );
   const [progress, setProgress] = useState<ProgressStatus | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -237,6 +240,7 @@ export default function UploadSection() {
 
     const body = new FormData();
     body.append("file", file);
+    body.append("method", method);
     body.append("col_x", mapping.X);
     body.append("col_y", mapping.Y);
     body.append("col_z", mapping.Z);
@@ -283,7 +287,7 @@ export default function UploadSection() {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
       setStatus("error");
     }
-  }, [file, mapping, pollStatus, stopPolling]);
+  }, [file, mapping, method, pollStatus, stopPolling]);
 
   const columns = inspect?.columns ?? [];
   const canConfirm =
@@ -374,6 +378,27 @@ export default function UploadSection() {
                 emptyLabel="— без HoleID —"
                 onChange={(v) => setMapping({ ...mapping, HoleID: v })}
               />
+              <label className="upload-map-field">
+                <span className="upload-map-label">Метод интерполяции</span>
+                <select
+                  className="upload-map-select"
+                  value={method}
+                  onChange={(e) =>
+                    setMethod(
+                      e.target.value as
+                        | "ordinary_kriging"
+                        | "anisotropic_idw",
+                    )
+                  }
+                >
+                  <option value="ordinary_kriging">
+                    Ordinary Kriging (OK)
+                  </option>
+                  <option value="anisotropic_idw">
+                    Анизотропный IDW
+                  </option>
+                </select>
+              </label>
             </div>
 
             {inspect.warnings.length > 0 ? (

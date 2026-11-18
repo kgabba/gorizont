@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
 
-from .kriging import ordinary_kriging_at_points
+from .idw import anisotropic_idw_at_points
+from .kriging import ordinary_kriging_at_points, select_neighbour_indices
 from .models import (
     CVFold,
     CVPlan,
@@ -21,6 +22,34 @@ from .models import (
     compute_objective,
     ObjectiveConfig,
 )
+
+METHOD_ORDINARY_KRIGING = "ordinary_kriging"
+METHOD_ANISOTROPIC_IDW = "anisotropic_idw"
+
+
+def _predict_at_points(
+    known_xyz: np.ndarray,
+    known_z: np.ndarray,
+    pred_xyz: np.ndarray,
+    vg: VariogramFixed,
+    search: SearchParams,
+    *,
+    method: str = METHOD_ORDINARY_KRIGING,
+    power: float | None = None,
+) -> np.ndarray:
+    method_eff = (method or METHOD_ORDINARY_KRIGING).strip().lower()
+    if method_eff == METHOD_ANISOTROPIC_IDW:
+        if power is None:
+            raise ValueError("power is required for anisotropic_idw")
+        return anisotropic_idw_at_points(
+            known_xyz, known_z, pred_xyz, vg, search, float(power)
+        )
+    if method_eff != METHOD_ORDINARY_KRIGING:
+        raise ValueError(
+            f"unknown method {method!r}; expected "
+            f"{METHOD_ORDINARY_KRIGING!r} or {METHOD_ANISOTROPIC_IDW!r}"
+        )
+    return ordinary_kriging_at_points(known_xyz, known_z, pred_xyz, vg, search)
 
 
 class DataError(ValueError):
@@ -177,6 +206,9 @@ def evaluate_oof(
     vg: VariogramFixed,
     search: SearchParams,
     obj_cfg: ObjectiveConfig,
+    *,
+    method: str = METHOD_ORDINARY_KRIGING,
+    power: float | None = None,
 ) -> TrialMetrics:
     """Pooled OOF RMSE/MAE over all fold test points."""
     preds: list[float] = []
@@ -190,12 +222,14 @@ def evaluate_oof(
         if te.size == 0:
             continue
         n_tgt += int(te.size)
-        pred = ordinary_kriging_at_points(
+        pred = _predict_at_points(
             cloud.xyz[tr],
             cloud.values[tr],
             cloud.xyz[te],
             vg,
             search,
+            method=method,
+            power=power,
         )
         z = cloud.values[te]
         for p, y in zip(pred, z):
@@ -228,3 +262,70 @@ def evaluate_oof(
         n_invalid=n_invalid,
         objective=objective,
     )
+
+
+def evaluate_oof_masked(
+    cloud: PointCloud,
+    plan: CVPlan,
+    vg: VariogramFixed,
+    search: SearchParams,
+    candidate_global: np.ndarray,
+    *,
+    method: str = METHOD_ORDINARY_KRIGING,
+    power: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Predict only on OOF test points that appear in ``candidate_global``.
+
+    Returns ``(indices, preds, n_used)`` aligned arrays for every candidate
+    that was a fold test point (preds may be NaN). Does not touch non-candidates.
+    """
+    cand = set(int(i) for i in np.asarray(candidate_global, dtype=int).ravel())
+    Q = vg.orientation_matrix
+    indices: list[int] = []
+    preds: list[float] = []
+    n_used: list[int] = []
+
+    for fold in plan.folds:
+        tr = fold.train_idx
+        te = fold.test_idx
+        if te.size == 0:
+            continue
+        # Which test points are still candidates?
+        te_list = [int(g) for g in te.tolist() if int(g) in cand]
+        if not te_list:
+            continue
+        te_arr = np.asarray(te_list, dtype=int)
+        known_xyz = cloud.xyz[tr]
+        known_z = cloud.values[tr]
+        pred = _predict_at_points(
+            known_xyz,
+            known_z,
+            cloud.xyz[te_arr],
+            vg,
+            search,
+            method=method,
+            power=power,
+        )
+        for j, gi in enumerate(te_list):
+            delta = known_xyz - cloud.xyz[gi]
+            nb = select_neighbour_indices(delta, Q, search)
+            indices.append(gi)
+            preds.append(float(pred[j]) if np.isfinite(pred[j]) else float("nan"))
+            n_used.append(int(nb.size))
+
+    return (
+        np.asarray(indices, dtype=int),
+        np.asarray(preds, dtype=float),
+        np.asarray(n_used, dtype=int),
+    )
+
+
+def oof_target_indices(plan: CVPlan) -> np.ndarray:
+    """All global indices that appear as fold test points (pooled OOF set)."""
+    parts: list[np.ndarray] = []
+    for fold in plan.folds:
+        if fold.test_idx.size:
+            parts.append(fold.test_idx.astype(int, copy=False))
+    if not parts:
+        return np.array([], dtype=int)
+    return np.unique(np.concatenate(parts))

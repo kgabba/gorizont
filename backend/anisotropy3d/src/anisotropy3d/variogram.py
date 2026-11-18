@@ -143,11 +143,13 @@ def fit_spherical_weighted(
     range_: float | None = None,
     max_range: float | None = None,
     boundary_frac: float = 0.98,
+    min_valid_lags: int = 2,
 ) -> VariogramFit:
     """Fit spherical model with weights = n_pairs.
 
     Fixed parameters stay fixed; free ones optimized.
     Does **not** use max(sill, variance) correction.
+    ``sill`` argument/result is partial sill.
     """
     lag = np.asarray(lag, dtype=float)
     gamma = np.asarray(gamma, dtype=float)
@@ -161,8 +163,12 @@ def fit_spherical_weighted(
         range_=0.0,
         sse=float("inf"),
         n_valid_lags=int(lag.size),
+        n_pairs_total=int(np.sum(n_pairs)) if n_pairs.size else 0,
+        max_observed_lag=float(np.max(lag)) if lag.size else None,
+        status="not_identifiable",
+        status_reasons=[f"n_valid_lags={lag.size}<{min_valid_lags}"],
     )
-    if lag.size < 2:
+    if lag.size < int(min_valid_lags):
         return empty
 
     g_max = float(np.max(gamma))

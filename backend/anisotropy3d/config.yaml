@@ -1,45 +1,68 @@
 # anisotropy3d defaults — all thresholds for anisotropy estimation
+# Thresholds marked "engineering" are project gates, not universal literature norms.
 
 n_min_points: 30
 near_zero_var_eps: 1.0e-12
-# PCA eigenvalues / total: below → linear; second cumsum below → planar
+# Hard degeneracy (blocks MOI → technical sphere):
+# - linear: points essentially on a line (PCA)
+# - planar: absolute thickness ≤ max(nn_mult * median_NN, rel * max_span)
+#   NOT "pancake" drillhole clouds (XY ≫ Z with real depth) — those stay 3D.
 degeneracy_linear_frac: 0.02
-# third PCA eigenvalue fraction below this → treat as planar
-degeneracy_planar_frac: 0.02
+degeneracy_coplanar_nn_mult: 2.0
+degeneracy_coplanar_rel_span: 1.0e-4
+# Soft PCA aspect flag only (diagnostics; does not block MOI)
+degeneracy_aspect_pancake_frac: 0.05
 coord_dup_decimals: 6
 
 detector:
   mode: moi3d                 # moi3d | legacy_range_ellipsoid
 
 moi:
-  isotropy_ratio_max: 1.30    # max/min MOI eigenvalue; ≤ → ISO (preliminary)
+  isotropy_ratio_max: 1.30    # max/min MOI eigenvalue; ≤ → weak orientation signal
   distance_power: 2.5         # mass = C / d^power
   # Mid-lag window (fractions of max_dist): near-origin C≈1 is nearly isotropic
   # and would dominate mass via 1/d^power without a lag gate.
   lag_frac_of_max_dist_min: 0.2
   lag_frac_of_max_dist_max: 0.9
+  # If true: 1–2 reliable axes → PARTIAL_RANGES (keep those ranges, omni-fill rest).
+  # If false: fall through to ORIENTATION_ONLY (all omni ranges + MOI orientation).
+  allow_partial_ranges: true
 
 pairs:
   max_dist: null              # null → percentile of all pairwise distances
-  max_dist_percentile: 50.0
+  max_dist_percentile: 50.0   # engineering default; reported in diagnostics
   max_pairs: 200000           # subsample if more; null = no cap
   seed: 42
+  report_lag_support: true
 
 variogram:
   model: spherical
   n_lags: 12
   min_pairs_per_lag: 8
-  # omni fit: free nugget, sill, range (weighted by n_pairs)
+  # omni fit: free nugget, sill(=partial_sill), range (weighted by n_pairs)
   # directional coarse scan: fix nugget/sill near omni, free range only
 
+# Engineering gates for per-axis range identifiability (not literature norms).
+range_fit:
+  min_valid_lags: 5
+  min_pairs_per_axis: 80
+  min_pairs_per_lag: 8
+  require_sill_approach: true
+  sill_approach_frac: 0.8       # late-lag mean gamma / (nugget+partial_sill)
+  range_upper_factor: 2.5       # optimizer bound = factor * max_dist; NOT a geological estimate
+  boundary_frac: 0.98           # range >= frac * upper → boundary_hit
+  adaptive_angular_tol_deg: [18.0, 22.5, 30.0]
+  prefer_smallest_tol: true
+  n_lags: 16
+
 directions:
-  n_directions: 96            # Fibonacci hemisphere
+  n_directions: 96            # Fibonacci hemisphere (MOI radial samples / legacy scan)
   angular_tolerance_deg: 22.5
   bandwidth: null             # absolute; null → disable bandwidth gate
   bandwidth_frac_max_dist: null
   min_pairs: 40
-  min_valid_lags: 4
-  range_boundary_frac: 0.98   # range >= frac * upper_bound → exclude from SPD fit
+  min_valid_lags: 4           # legacy scan only; MOI axis fits use range_fit.min_valid_lags
+  range_boundary_frac: 0.98
 
 ellipsoid:
   weight_n_pairs_pow: 1.0
@@ -56,18 +79,27 @@ refinement:
   local_orient_steps: 5
 
 classification:
-  ratio_iso_max: 1.3          # maj/min below → ISOTROPIC
+  ratio_iso_max: 1.3          # maj/min below → ISOTROPIC (only if ranges reliable)
   ratio_equal_max: 1.3        # axes "equal" if ratio < this
 
 confidence:
   nugget_frac_high: 0.45      # diagnostics only — does NOT auto-force ISO
-  min_valid_directions: 12
-  min_valid_frac: 0.25        # of n_directions
-  max_ellipsoid_rmse_rel: 0.35  # relative residual on 1/r^2
+  min_valid_directions: 12    # legacy detector
+  min_valid_frac: 0.25
+  max_ellipsoid_rmse_rel: 0.35
   high_min_valid_directions: 24
   high_max_ellipsoid_rmse_rel: 0.15
-  # SVD σ_min/σ_max of valid direction unit vectors; below → coverage bad
   coverage_min_sv_ratio: 0.05
+  # MOI orientation support (engineering)
+  orientation_min_moi_samples: 24
+  orientation_min_strength: 1.15
+  # HIGH range_confidence requires all three axes reliable; any boundary_hit blocks HIGH
+  range_high_requires_all_reliable: true
+
+trend_diagnostics:
+  enabled: true
+  # engineering heuristics only; no automatic detrend
+  coord_corr_warn: 0.35
 
 output:
   write_png: true

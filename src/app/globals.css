@@ -1082,6 +1082,122 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.report-header-note {
+  margin: 1rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--mute);
+}
+
+.report-pass-banner {
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+}
+
+.report-pass-banner.is-two {
+  border-color: color-mix(in srgb, var(--fg) 35%, var(--line));
+}
+
+.report-pass-banner-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.report-pass-banner-text {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--mute);
+}
+
+.report-pass-banner-meta {
+  margin: 0.85rem 0 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+@media (min-width: 720px) {
+  .report-pass-banner-meta {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+.report-pass-banner-meta dt {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+.report-pass-banner-meta dd {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-pass-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+}
+
+@media (min-width: 860px) {
+  .report-pass-grid.is-two {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.report-pass-card {
+  border: 1px solid var(--line);
+  padding: 0.85rem 0.95rem 1rem;
+}
+
+.report-pass-card.is-fill {
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.report-pass-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.report-pass-card-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.report-pass-pill {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+  border: 1px solid var(--line);
+  padding: 0.15rem 0.4rem;
+}
+
+.report-pass-card-loss {
+  margin: 0.45rem 0 0.75rem;
+  font-size: 0.86rem;
+  color: var(--mute);
+}
+
+.report-pass-dl {
+  margin-top: 0;
+}
+
 .report-section {
   margin-top: 1.75rem;
   padding-top: 1.5rem;

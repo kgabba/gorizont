@@ -32,19 +32,38 @@ class PairCloud3D:
 
 @dataclass
 class VariogramFit:
-    """Experimental + fitted 1D variogram."""
+    """Experimental + fitted 1D variogram.
+
+    ``sill`` is the **partial sill** (structural component). Prefer
+    ``partial_sill`` / ``total_sill`` in new code; ``sill`` kept for OK/IDW.
+    """
 
     lag: np.ndarray
     gamma: np.ndarray
     n_pairs: np.ndarray
     nugget: float
-    sill: float  # partial sill
+    sill: float  # partial sill (alias)
     range_: float
     sse: float
     model: str = "spherical"
     n_valid_lags: int = 0
     range_upper_bound: float | None = None
     range_boundary_hit: bool = False
+    # Identifiability / directional diagnostics (axis fits)
+    status: str = "unknown"  # reliable | unreliable | not_identifiable | unknown
+    angular_tolerance_deg_used: float | None = None
+    n_pairs_total: int = 0
+    max_observed_lag: float | None = None
+    sill_approach_ok: bool | None = None
+    status_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def partial_sill(self) -> float:
+        return float(self.sill)
+
+    @property
+    def total_sill(self) -> float:
+        return float(self.nugget) + float(self.sill)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -52,13 +71,21 @@ class VariogramFit:
             "gamma": self.gamma.tolist(),
             "n_pairs": self.n_pairs.tolist(),
             "nugget": float(self.nugget),
-            "sill": float(self.sill),
+            "sill": float(self.sill),  # partial sill alias for OK/IDW
+            "partial_sill": float(self.sill),
+            "total_sill": float(self.nugget) + float(self.sill),
             "range": float(self.range_),
             "sse": float(self.sse),
             "model": self.model,
             "n_valid_lags": int(self.n_valid_lags),
             "range_upper_bound": self.range_upper_bound,
             "range_boundary_hit": bool(self.range_boundary_hit),
+            "status": self.status,
+            "angular_tolerance_deg_used": self.angular_tolerance_deg_used,
+            "n_pairs_total": int(self.n_pairs_total),
+            "max_observed_lag": self.max_observed_lag,
+            "sill_approach_ok": self.sill_approach_ok,
+            "status_reasons": list(self.status_reasons),
         }
 
 
@@ -95,7 +122,7 @@ class DirectionalEstimate:
 class Anisotropy3DResult:
     """Final anisotropy estimate."""
 
-    type: str  # ISOTROPIC | AXIAL_PROLATE | AXIAL_OBLATE | TRIAXIAL
+    type: str  # ISOTROPIC | AXIAL_PROLATE | AXIAL_OBLATE | TRIAXIAL | UNCLASSIFIED
     range_major: float
     range_intermediate: float
     range_minor: float
@@ -107,12 +134,18 @@ class Anisotropy3DResult:
     major_minor_ratio: float
     intermediate_minor_ratio: float
     nugget: float
-    sill: float
+    sill: float  # partial sill alias
     variogram_model: str
     confidence: str  # HIGH | MEDIUM | LOW
     confidence_reasons: list[str] = field(default_factory=list)
     fallback_reason: str | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    # Split confidence / identifiability
+    orientation_confidence: str = "LOW"
+    range_confidence: str = "LOW"
+    anisotropy_identifiability: str = "NOT_IDENTIFIABLE"
+    # IDENTIFIED | PARTIAL_RANGES | ORIENTATION_ONLY | NOT_IDENTIFIABLE
+    geological_isotropy_claimed: bool = False
     # reporting angles (degrees); derived from vectors
     major_azimuth_deg: float | None = None
     major_dip_deg: float | None = None
@@ -136,8 +169,14 @@ class Anisotropy3DResult:
             "intermediate_minor_ratio": float(self.intermediate_minor_ratio),
             "nugget": float(self.nugget),
             "sill": float(self.sill),
+            "partial_sill": float(self.sill),
+            "total_sill": float(self.nugget) + float(self.sill),
             "variogram_model": self.variogram_model,
             "confidence": self.confidence,
+            "orientation_confidence": self.orientation_confidence,
+            "range_confidence": self.range_confidence,
+            "anisotropy_identifiability": self.anisotropy_identifiability,
+            "geological_isotropy_claimed": bool(self.geological_isotropy_claimed),
             "confidence_reasons": list(self.confidence_reasons),
             "fallback_reason": self.fallback_reason,
             "diagnostics": self.diagnostics,
@@ -148,7 +187,6 @@ class Anisotropy3DResult:
             "minor_azimuth_deg": self.minor_azimuth_deg,
             "minor_dip_deg": self.minor_dip_deg,
         }
-        # Dual candidates for later ISO vs ANISO CV selection (MOI path)
         for key in ("iso_candidate", "aniso_candidate", "anisotropy_evidence"):
             if key in self.diagnostics:
                 d[key] = self.diagnostics[key]

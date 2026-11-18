@@ -32,6 +32,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(BACKEND_ROOT / "runs")))
 ANISO_CONFIG = BACKEND_ROOT / "anisotropy3d" / "config.yaml"
 TUNER_CONFIG = BACKEND_ROOT / "kriging3d_tuner" / "config.yaml"
+# IDW site config: same as idw_630_1500_j_p0.5_6 (J, power 0.5–6), trials=400.
+TUNER_CONFIG_IDW = BACKEND_ROOT / "kriging3d_tuner" / "config_idw.yaml"
 
 app = FastAPI(
     title="gorizo",
@@ -55,7 +57,10 @@ def _user_error(exc: BaseException) -> str:
     if "too few points" in low or "n_min" in low:
         return "Недостаточно точек для анализа."
     if "aniso_candidate" in low:
-        return "Нет валидного aniso_candidate после этапа анизотропии."
+        return (
+            "Нет валидного aniso_candidate после этапа анизотропии "
+            "(не удалось построить модель пространственной структуры)."
+        )
     if "anisotropy result missing" in low:
         return "Этап анизотропии не создал result.json."
     if "invalid" in low and "csv" in low:
@@ -256,6 +261,7 @@ def _run_analyze_job(
     input_meta: dict[str, Any],
     original_filename: str | None,
     n_trials: int | None,
+    method: str | None = None,
 ) -> None:
     try:
         write_progress(
@@ -265,19 +271,28 @@ def _run_analyze_job(
             stage_label="Загрузка данных",
             trial=None,
             n_trials=n_trials,
+            method=method,
+        )
+        tuner_cfg = (
+            TUNER_CONFIG_IDW
+            if (method or "").strip().lower() == "anisotropic_idw"
+            else TUNER_CONFIG
         )
         run_pipeline(
             data_path=csv_path,
             out_dir=run_dir,
             aniso_config=ANISO_CONFIG,
-            tuner_config=TUNER_CONFIG,
+            tuner_config=tuner_cfg,
             n_trials=n_trials,
+            method=method,
+            mode="single",
         )
         write_run_meta(
             run_dir,
             original_filename=original_filename,
             n_points=int(input_meta["n_points"]),
             has_hole_id=bool(input_meta["has_hole_id"]),
+            method=method,
         )
         # pipeline already marks completed; keep meta on progress
         prog = _read_progress(run_dir) or {}
@@ -290,6 +305,7 @@ def _run_analyze_job(
             n_trials=prog.get("n_trials") or n_trials,
             best_trial_number=prog.get("best_trial_number"),
             n_points=int(input_meta["n_points"]),
+            method=method,
         )
     except (PipelineError, DataValidationError, DataError) as exc:
         logger.exception("analyze failed for run_id=%s", run_id)
@@ -336,6 +352,7 @@ def get_analysis_status(run_id: str) -> dict[str, Any]:
 async def analyze(
     file: UploadFile = File(...),
     trials: int | None = Form(None),
+    method: str | None = Form(None),
     col_x: str | None = Form(None),
     col_y: str | None = Form(None),
     col_z: str | None = Form(None),
@@ -345,6 +362,16 @@ async def analyze(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Пустой файл.")
+
+    method_eff = (method or "ordinary_kriging").strip().lower()
+    if method_eff not in ("ordinary_kriging", "anisotropic_idw"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Неизвестный method. Допустимо: ordinary_kriging "
+                "или anisotropic_idw."
+            ),
+        )
 
     try:
         canonical, input_meta = _canonical_or_mapped(
@@ -369,6 +396,7 @@ async def analyze(
         original_filename=file.filename,
         n_points=int(input_meta["n_points"]),
         has_hole_id=bool(input_meta["has_hole_id"]),
+        method=method_eff,
     )
     write_progress(
         run_dir,
@@ -378,6 +406,7 @@ async def analyze(
         trial=None,
         n_trials=trials,
         n_points=int(input_meta["n_points"]),
+        method=method_eff,
     )
 
     thread = threading.Thread(
@@ -389,6 +418,7 @@ async def analyze(
             "input_meta": input_meta,
             "original_filename": file.filename,
             "n_trials": trials,
+            "method": method_eff,
         },
         name=f"analyze-{run_id[:8]}",
         daemon=True,
@@ -398,6 +428,7 @@ async def analyze(
     return {
         "run_id": run_id,
         "status": "running",
+        "method": method_eff,
         "input": {
             "n_points": int(input_meta["n_points"]),
             "has_hole_id": bool(input_meta["has_hole_id"]),

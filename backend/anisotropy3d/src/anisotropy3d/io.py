@@ -32,6 +32,32 @@ def _cfg(cfg: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return cur
 
 
+def _median_nn_dist(xyz: np.ndarray, *, max_n: int = 1500, seed: int = 42) -> float:
+    """Median nearest-neighbour distance (subsample for large clouds)."""
+    n = int(len(xyz))
+    if n < 2:
+        return 0.0
+    if n > max_n:
+        rng = np.random.default_rng(seed)
+        pts = xyz[rng.choice(n, size=max_n, replace=False)]
+    else:
+        pts = xyz
+    try:
+        from scipy.spatial import cKDTree
+
+        dist, _ = cKDTree(pts).query(pts, k=2)
+        return float(np.median(dist[:, 1]))
+    except Exception:
+        # Tiny fallback without scipy: mean of a few brute-force NNs
+        m = min(len(pts), 64)
+        dmin = []
+        for i in range(m):
+            d = np.linalg.norm(pts - pts[i], axis=1)
+            d[i] = np.inf
+            dmin.append(float(np.min(d)))
+        return float(np.median(dmin)) if dmin else 0.0
+
+
 def load_points(path: str | Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     df = df.rename(columns={c: str(c).strip() for c in df.columns})
@@ -43,7 +69,7 @@ def load_points(path: str | Path) -> pd.DataFrame:
         if want.lower() in cols:
             rename[cols[want.lower()]] = want
     if "Value" not in df.columns:
-        for alt in ("Grade", "value", "V", "z_value"):
+        for alt in ("Fe", "Grade", "value", "V", "z_value"):
             if alt in df.columns:
                 rename[alt] = "Value"
                 break
@@ -98,24 +124,47 @@ def validate_points(df: pd.DataFrame, cfg: dict[str, Any]) -> ValidatedPoints:
                 f"after dedup n_points={len(xyz)} < n_min_points={n_min}"
             )
 
-    # spatial dimensionality via PCA of coordinates
+    # Spatial dimensionality.
+    # PCA aspect ratio alone is NOT enough: drillhole clouds are often
+    # "pancake" (XY ≫ Z) yet fully 3D for variography/MOI. Hard degeneracy
+    # only when the cloud is literally a line or thinner than sampling scale.
     c = xyz - xyz.mean(axis=0, keepdims=True)
-    # covariance
     cov = (c.T @ c) / max(len(xyz) - 1, 1)
     evals = np.sort(np.linalg.eigvalsh(cov))[::-1]  # descending
     evals = np.maximum(evals, 0.0)
     total = float(evals.sum()) + 1e-18
     fracs = evals / total
+    spans = xyz.max(axis=0) - xyz.min(axis=0)
+    min_span = float(np.min(spans))
+    max_span = float(np.max(spans))
+    median_nn = _median_nn_dist(xyz)
+
     lin_thr = float(_cfg(cfg, "degeneracy_linear_frac", default=0.02))
-    pln_thr = float(_cfg(cfg, "degeneracy_planar_frac", default=0.05))
+    # Absolute coplanar: thickness ≪ typical sample spacing (or ≪ bbox).
+    nn_mult = float(_cfg(cfg, "degeneracy_coplanar_nn_mult", default=2.0))
+    rel_span = float(_cfg(cfg, "degeneracy_coplanar_rel_span", default=1.0e-4))
+    # Soft PCA pancake flag (diagnostic only; never blocks MOI).
+    # Accept legacy key degeneracy_planar_frac as the aspect threshold.
+    aspect_thr = float(
+        _cfg(
+            cfg,
+            "degeneracy_aspect_pancake_frac",
+            default=_cfg(cfg, "degeneracy_planar_frac", default=0.05),
+        )
+    )
+
     spatial_dim = 3
     degeneracy = None
+    aspect_pancake = bool(fracs[0] + fracs[1] > 1.0 - aspect_thr)
+    coplanar_thr = max(nn_mult * median_nn, rel_span * max_span, 1e-12)
+
     if fracs[0] > 1.0 - lin_thr:
         spatial_dim = 1
         degeneracy = "linear"
-    elif fracs[0] + fracs[1] > 1.0 - pln_thr:
+    elif min_span <= coplanar_thr:
         spatial_dim = 2
         degeneracy = "planar"
+    # else: keep spatial_dim=3 even if aspect_pancake — MOI may proceed
 
     diag = {
         "n_raw": n_raw,
@@ -125,6 +174,12 @@ def validate_points(df: pd.DataFrame, cfg: dict[str, Any]) -> ValidatedPoints:
         "value_variance": var,
         "value_mean": float(np.mean(values)),
         "pca_eigenvalue_fracs": fracs.tolist(),
+        "bbox_spans": spans.tolist(),
+        "min_span": min_span,
+        "max_span": max_span,
+        "median_nn_dist": median_nn,
+        "coplanar_thickness_thr": coplanar_thr,
+        "aspect_pancake": aspect_pancake,
         "spatial_dim": spatial_dim,
         "spatial_degeneracy": degeneracy,
         "bbox": {

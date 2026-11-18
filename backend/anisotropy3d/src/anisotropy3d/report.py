@@ -68,32 +68,86 @@ def write_report(
     labels = ("major", "intermediate", "minor")
     if axis_fits and len(axis_fits) == 3:
         for fit, name, lab in zip(axis_fits, names, labels):
-            _plot_omni(out_dir / name, fit, title=f"{lab} directional VG")
+            status = getattr(fit, "status", None) or "unknown"
+            tol = getattr(fit, "angular_tolerance_deg_used", None)
+            n_lags = int(getattr(fit, "n_valid_lags", fit.lag.size))
+            n_pairs = int(getattr(fit, "n_pairs_total", int(np.sum(fit.n_pairs)) if fit.n_pairs.size else 0))
+            warn = status != "reliable"
+            title = (
+                f"{lab} directional VG | status={status} | "
+                f"lags={n_lags} pairs={n_pairs}"
+            )
+            if tol is not None:
+                title += f" | tol={tol:g}°"
+            if getattr(fit, "range_boundary_hit", False):
+                title += " | BOUNDARY"
+            _plot_omni(
+                out_dir / name,
+                fit,
+                title=title,
+                warn=warn,
+            )
 
 
-def _plot_omni(path: Path, fit: VariogramFit, title: str = "Omnidirectional variogram") -> None:
+def _plot_omni(
+    path: Path,
+    fit: VariogramFit,
+    title: str = "Omnidirectional variogram",
+    *,
+    warn: bool = False,
+) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     if fit.lag.size:
-        ax.scatter(fit.lag, fit.gamma, c="C0", s=40, zorder=3, label="experimental")
-        # Start slightly above 0 so the plot shows γ(0+)=nugget without a
-        # meaningless vertical jump from theoretical γ(0)=0.
+        # bubble size ~ n_pairs
+        sizes = 20 + 40 * (
+            fit.n_pairs / max(float(np.max(fit.n_pairs)), 1.0)
+            if fit.n_pairs.size
+            else np.ones_like(fit.lag)
+        )
+        ax.scatter(
+            fit.lag,
+            fit.gamma,
+            c="C0",
+            s=sizes,
+            zorder=3,
+            label="experimental",
+            alpha=0.85,
+        )
         h_max = float(np.max(fit.lag)) * 1.05
         h = np.linspace(max(h_max * 1e-6, 1e-9), h_max, 200)
-        ax.plot(
-            h,
-            spherical_model(h, fit.nugget, fit.sill, fit.range_),
-            "C1-",
-            lw=2,
-            label="spherical",
+        if np.isfinite(fit.range_) and fit.range_ > 0:
+            ax.plot(
+                h,
+                spherical_model(h, fit.nugget, fit.sill, fit.range_),
+                "C1-",
+                lw=2,
+                label="spherical",
+            )
+        ax.axhline(
+            fit.nugget + fit.sill,
+            color="gray",
+            ls="--",
+            lw=1,
+            label="total sill (nugget+partial)",
         )
-        ax.axhline(fit.nugget + fit.sill, color="gray", ls="--", lw=1, label="sill")
         ax.legend(fontsize=8)
-        # Always anchor γ at 0 so the scale is not clipped to the nugget.
         y_top = max(
             float(np.nanmax(fit.gamma)),
             float(fit.nugget + fit.sill),
         )
         ax.set_ylim(0.0, y_top * 1.08 if y_top > 0 else 1.0)
+    if warn:
+        ax.text(
+            0.02,
+            0.98,
+            "WARNING: range not reliable / not identifiable",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=8,
+            color="darkred",
+            bbox=dict(boxstyle="round,pad=0.3", fc="mistyrose", ec="salmon", alpha=0.9),
+        )
     ax.set_xlabel("h")
     ax.set_ylabel("γ(h)")
     ax.set_title(title)

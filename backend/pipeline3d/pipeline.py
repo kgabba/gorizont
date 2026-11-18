@@ -71,6 +71,8 @@ def run_pipeline(
     aniso_config: str | Path,
     tuner_config: str | Path,
     n_trials: int | None = None,
+    method: str | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     """CSV → anisotropy3d → gate aniso_candidate → kriging3d_tuner."""
     data_path = Path(data_path)
@@ -131,6 +133,8 @@ def run_pipeline(
         config_path=tuner_config,
         n_trials=n_trials,
         progress_path=out_dir / "progress.json",
+        method=method,
+        mode=mode,
     )
 
     summary = {
@@ -148,7 +152,10 @@ def run_pipeline(
             "range_minor": cand.get("range_minor"),
         },
         "n_trials": n_trials,
+        "method": tune_result.get("method") or method,
         "tuner_best": {
+            "method": tune_result.get("method"),
+            "power": tune_result.get("power"),
             "CV_RMSE": tune_result.get("CV_RMSE"),
             "CV_MAE": tune_result.get("CV_MAE"),
             "prediction_coverage": tune_result.get("prediction_coverage"),
@@ -158,6 +165,8 @@ def run_pipeline(
             "K_minor": tune_result.get("K_minor"),
             "Nmin": tune_result.get("Nmin"),
             "Nmax": tune_result.get("Nmax"),
+            "J": tune_result.get("J"),
+            "mean_n_used": tune_result.get("mean_n_used"),
         },
     }
     summary_path = out_dir / "pipeline_summary.json"

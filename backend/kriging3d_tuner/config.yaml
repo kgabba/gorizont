@@ -7,7 +7,10 @@ cv:
   grid_ny: 3
   grid_nz: 2
 
+# loss: rmse (coverage-gated RMSE) | j (SE on estimated + λ_f on unevaluated)
+# Coverage gate applies only when loss=rmse.
 objective:
+  loss: rmse
   coverage_min: 0.97
   coverage_penalty: 1.0e6
   empty_rmse_fallback: 1.0e6
@@ -18,11 +21,58 @@ search_space:
   k_min: 0.05
   nmin_lo: 4
   nmin_hi: 12
-  nmax_lo: 8
+  # Allow compact neighbourhoods (was 8; Optuna was stuck on the floor)
+  nmax_lo: 4
   nmax_hi: 64
+  # Compact octant ranges: small neighbour budgets, compatible with Nmax
+  minoct_lo: 1
+  minoct_hi: 4
+  minperoc_lo: 1
+  minperoc_hi: 3
+  maxperoc_lo: 1
+  maxperoc_hi: 4
 
 optuna:
-  n_trials: 200
+  n_trials: 400
   n_startup_trials: null
   n_ei_candidates: 64
   flush_every: 25
+
+# mode: single (default) | multipass | sequential_multipass_optuna_J
+# (or set multipass.enabled for the gated multipass)
+mode: single
+
+# Interpolation method for mode=single
+method: ordinary_kriging  # ordinary_kriging | anisotropic_idw
+
+idw:
+  power_min: 0.5
+  power_max: 6.0
+
+# If pass-1 OOF coverage < trigger_below, run pass-2: RMSE + coverage gate.
+coverage_fill:
+  enabled: true
+  trigger_below: 1.0
+  pass2_coverage_min: 1.0
+  r_expand_factor: 2.0
+  n_trials: null  # null → same as optuna.n_trials
+
+multipass:
+  enabled: false
+  n_trials_per_pass: 200
+  coverage_targets: [0.30, 0.60, 1.0]
+  risky_r_major_factor: 2.0
+
+# Experimental: sequential Optuna passes minimizing J = RMSE² + λ_f·unevaluated
+multipass_j:
+  max_passes: 3
+  n_trials_per_pass: 200
+  compare_single: true
+
+# Defaults for fixed A/B scripts. Tuner uses Optuna (or force_octant_search).
+# See OCTANT_NOTES.md.
+octants:
+  octant_search: false
+  MINOCT: 2
+  MINPEROC: 2
+  MAXPEROC: 4

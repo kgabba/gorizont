@@ -51,7 +51,13 @@ export default function TechnicalDetails({ data }: { data: AnalyzeReportData }) 
       objective: t.objective as number,
     }));
 
-  const proxOrder = ["R_major", "K_inter", "K_minor", "Nmin", "Nmax"] as const;
+  const isIdw =
+    (data.search_params.method || data.header.method) === "anisotropic_idw";
+  const proxOrder = (
+    isIdw
+      ? (["power", "R_major", "K_inter", "K_minor", "Nmin", "Nmax"] as const)
+      : (["R_major", "K_inter", "K_minor", "Nmin", "Nmax"] as const)
+  );
 
   return (
     <section
@@ -149,11 +155,14 @@ export default function TechnicalDetails({ data }: { data: AnalyzeReportData }) 
           <ul className="report-prox-list">
             {proxOrder.map((key) => {
               const info = o.proximity?.[key];
-              const digits = key.startsWith("N")
-                ? 0
-                : key.startsWith("K")
+              const digits =
+                key === "power"
                   ? 2
-                  : 0;
+                  : key.startsWith("N")
+                    ? 0
+                    : key.startsWith("K")
+                      ? 2
+                      : 0;
               return (
                 <li key={key} className="report-prox-item">
                   <div className="report-prox-head">
@@ -237,6 +246,7 @@ export default function TechnicalDetails({ data }: { data: AnalyzeReportData }) 
                     <th>MAE</th>
                     <th>%</th>
                     <th>R₁</th>
+                    <th>Секторы</th>
                     <th>Nmin</th>
                     <th>Nmax</th>
                   </tr>
@@ -255,6 +265,11 @@ export default function TechnicalDetails({ data }: { data: AnalyzeReportData }) 
                       <td>{fmtNum(t.CV_MAE, 2)}</td>
                       <td>{fmtPct(t.prediction_coverage)}</td>
                       <td>{fmtNum(t.R_major, 0)}</td>
+                      <td>
+                        {Boolean(t.sector_search ?? t.octant_search)
+                          ? fmtNum(t.n_sectors, 0)
+                          : "выкл."}
+                      </td>
                       <td>{fmtNum(t.Nmin, 0)}</td>
                       <td>{fmtNum(t.Nmax, 0)}</td>
                     </tr>

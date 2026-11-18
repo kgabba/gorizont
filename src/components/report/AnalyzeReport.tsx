@@ -3,18 +3,22 @@
 import { useEffect, useState } from "react";
 import type { AnalyzeReportData } from "@/lib/reportTypes";
 import Conclusion from "./Conclusion";
+import CoverageFillPasses from "./CoverageFillPasses";
 import ReportHeader from "./ReportHeader";
 import SearchParams from "./SearchParams";
 import SpatialStructure from "./SpatialStructure";
 import TechnicalDetails from "./TechnicalDetails";
+import ValidationPlots from "./ValidationPlots";
 
 const NAV = [
   { id: "report-summary", label: "Сводка", short: "Сводка" },
+  { id: "report-validation", label: "Проверка OOF", short: "OOF" },
   {
     id: "report-spatial",
     label: "Вариограмма и анизотропия",
     short: "Вариограмма",
   },
+  { id: "report-passes", label: "Проходы подбора", short: "Проходы" },
   { id: "report-search", label: "Область поиска", short: "Поиск" },
   { id: "report-tech", label: "Технические детали", short: "Детали" },
   {
@@ -80,6 +84,10 @@ export default function AnalyzeReport({ runId }: { runId: string }) {
     );
   }
 
+  const navItems = NAV.filter(
+    (item) => item.id !== "report-passes" || Boolean(data.coverage_fill?.enabled),
+  );
+
   return (
     <div className="report-page">
       <nav className="report-nav" aria-label="Разделы отчёта">
@@ -88,7 +96,7 @@ export default function AnalyzeReport({ runId }: { runId: string }) {
             Горизонт
           </a>
           <ul>
-            {NAV.map((item) => (
+            {navItems.map((item) => (
               <li key={item.id}>
                 <a href={`#${item.id}`}>
                   <span className="report-nav-label-full">{item.label}</span>
@@ -102,7 +110,9 @@ export default function AnalyzeReport({ runId }: { runId: string }) {
 
       <div className="report-body">
         <ReportHeader data={data} />
+        <ValidationPlots data={data} />
         <SpatialStructure data={data} />
+        <CoverageFillPasses data={data} />
         <SearchParams data={data} />
         <TechnicalDetails data={data} />
         <Conclusion data={data} />

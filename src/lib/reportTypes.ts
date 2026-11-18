@@ -9,8 +9,22 @@ export type ProximityInfo = {
   hi?: number | null;
 };
 
+export type SectorSearchFields = {
+  octant_search?: boolean | null;
+  sector_search?: boolean | null;
+  n_sectors?: number | null;
+  MINOCT?: number | null;
+  MINPEROC?: number | null;
+  MAXPEROC?: number | null;
+  discard_underfilled?: boolean | null;
+  neighbour_cap?: number | null;
+};
+
 export type TrialRow = {
   trial: number | null;
+  method?: string | null;
+  power?: number | null;
+  J?: number | null;
   R_major?: number | null;
   K_inter?: number | null;
   K_minor?: number | null;
@@ -25,7 +39,7 @@ export type TrialRow = {
   n_valid?: number | null;
   n_invalid?: number | null;
   n_tgt?: number | null;
-};
+} & SectorSearchFields;
 
 export type ReportImage = {
   name: string;
@@ -44,11 +58,52 @@ export type AnalyzeReportData = {
     has_hole_id?: boolean | null;
     cv_method?: string | null;
     created_at?: string | null;
+    method?: string | null;
+    method_label?: string | null;
   };
   kpi: {
     CV_RMSE?: number | null;
     CV_MAE?: number | null;
     prediction_coverage?: number | null;
+    J?: number | null;
+    coverage_fill_triggered?: boolean | null;
+    n_passes?: number | null;
+  };
+  coverage_fill?: {
+    enabled?: boolean | null;
+    triggered?: boolean | null;
+    n_passes?: number | null;
+    trigger_below?: number | null;
+    pass1_coverage?: number | null;
+    pass2_coverage?: number | null;
+    pass2_coverage_min?: number | null;
+    r_expand_factor?: number | null;
+    n_by_pass?: { "1"?: number | null; "2"?: number | null };
+    residual_failure_reasons?: Record<string, number>;
+    summary_ru?: string | null;
+    passes?: Array<
+      {
+        pass?: number | null;
+        label?: string | null;
+        role?: string | null;
+        loss?: string | null;
+        power?: number | null;
+        R_major?: number | null;
+        R_inter?: number | null;
+        R_minor?: number | null;
+        K_inter?: number | null;
+        K_minor?: number | null;
+        Nmin?: number | null;
+        Nmax?: number | null;
+        CV_RMSE?: number | null;
+        CV_MAE?: number | null;
+        local_CV_RMSE?: number | null;
+        local_CV_MAE?: number | null;
+        prediction_coverage?: number | null;
+        n_new?: number | null;
+        n_trials?: number | null;
+      } & SectorSearchFields
+    >;
   };
   spatial_structure: {
     anisotropy_type?: string | null;
@@ -72,6 +127,9 @@ export type AnalyzeReportData = {
     ellipsoid_kind?: string | null;
   };
   search_params: {
+    method?: string | null;
+    power?: number | null;
+    mean_n_used?: number | null;
     R_major?: number | null;
     R_inter?: number | null;
     R_minor?: number | null;
@@ -79,7 +137,7 @@ export type AnalyzeReportData = {
     K_minor?: number | null;
     Nmin?: number | null;
     Nmax?: number | null;
-  };
+  } & SectorSearchFields;
   validation: {
     CV_RMSE?: number | null;
     CV_MAE?: number | null;
@@ -90,6 +148,7 @@ export type AnalyzeReportData = {
     oof_available?: boolean;
     coverage_below_threshold?: boolean;
     coverage_threshold?: number;
+    coverage_fill_triggered?: boolean;
   };
   optimization: {
     best_trial_number?: number | null;
@@ -104,8 +163,13 @@ export type AnalyzeReportData = {
   };
   artifacts?: {
     images?: ReportImage[];
+    validation_images?: ReportImage[];
+    files?: ReportImage[];
   };
   conclusion_inputs: {
+    method?: string | null;
+    power?: number | null;
+    mean_n_used?: number | null;
     anisotropy_type?: string | null;
     variogram_model?: string | null;
     nugget?: number | null;
@@ -130,7 +194,9 @@ export type AnalyzeReportData = {
     R_major?: number | null;
     R_inter?: number | null;
     R_minor?: number | null;
-  };
+    coverage_fill_triggered?: boolean | null;
+    coverage_fill?: AnalyzeReportData["coverage_fill"];
+  } & SectorSearchFields;
 };
 
 export function artifactUrl(runId: string, relPath: string): string {

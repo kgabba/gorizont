@@ -68,17 +68,106 @@ export function buildConclusion(
     {
       title: "Область поиска",
       items: [
+        ...(inputs.method === "anisotropic_idw"
+          ? [
+              {
+                label: "Метод",
+                value: "Анизотропный IDW",
+              },
+              {
+                label: "Степень IDW (p)",
+                value: fmtNum(inputs.power, 3),
+              },
+            ]
+          : [
+              {
+                label: "Метод",
+                value: "Ordinary Kriging",
+              },
+            ]),
         {
           label: "Радиусы осей 1 / 2 / 3",
           value: `${fmtNum(inputs.R_major, 0)} / ${fmtNum(inputs.R_inter, 0)} / ${fmtNum(inputs.R_minor, 0)}`,
         },
         {
-          label: "Мин. / макс. кол-во точек",
+          label: "Секторный поиск",
+          value: Boolean(inputs.sector_search ?? inputs.octant_search)
+            ? `включён (${
+                inputs.n_sectors === 4
+                  ? "4 квадранта"
+                  : inputs.n_sectors === 16
+                    ? "16 секторов"
+                    : inputs.n_sectors === 8
+                      ? "8 октантов"
+                      : `${inputs.n_sectors ?? "—"}`
+              }; мин. секторов ${fmtNum(inputs.MINOCT, 0)}, мин./макс. на сектор ${fmtNum(inputs.MINPEROC, 0)}/${fmtNum(inputs.MAXPEROC, 0)})`
+            : "выключен",
+        },
+        {
+          label: Boolean(inputs.sector_search ?? inputs.octant_search)
+            ? "Мин. / макс. точек (из секторов)"
+            : "Мин. / макс. кол-во точек",
           value: `${fmtNum(inputs.Nmin, 0)} / ${fmtNum(inputs.Nmax, 0)}`,
         },
+        ...(inputs.method === "anisotropic_idw" && inputs.mean_n_used != null
+          ? [
+              {
+                label: "Среднее число соседей",
+                value: fmtNum(inputs.mean_n_used, 1),
+              },
+            ]
+          : []),
+        ...(inputs.coverage_fill_triggered
+          ? [
+              {
+                label: "Режим подбора",
+                value: "2 прохода (основной + дозаполнение покрытия)",
+              },
+            ]
+          : []),
       ],
     },
   ];
+
+  const fill = inputs.coverage_fill;
+  if (inputs.coverage_fill_triggered && fill?.passes && fill.passes.length >= 2) {
+    const p2 = fill.passes.find((p) => p.pass === 2) ?? fill.passes[1];
+    groups.push({
+      title: "Дозаполнение (проход 2)",
+      items: [
+        {
+          label: "Целевая функция",
+          value: "RMSE + покрытие 100%",
+        },
+        {
+          label: "Радиусы осей 1 / 2 / 3",
+          value: `${fmtNum(p2.R_major, 0)} / ${fmtNum(p2.R_inter, 0)} / ${fmtNum(p2.R_minor, 0)}`,
+        },
+        {
+          label: "Секторный поиск",
+          value: Boolean(p2.sector_search ?? p2.octant_search)
+            ? `включён (${p2.n_sectors ?? "—"} секторов)`
+            : "выключен",
+        },
+        {
+          label: "Мин. / макс. кол-во точек",
+          value: `${fmtNum(p2.Nmin, 0)} / ${fmtNum(p2.Nmax, 0)}`,
+        },
+        ...(inputs.method === "anisotropic_idw"
+          ? [
+              {
+                label: "Степень IDW (p)",
+                value: fmtNum(p2.power, 3),
+              },
+            ]
+          : []),
+        {
+          label: "Добавлено точек OOF",
+          value: fmtNum(p2.n_new, 0),
+        },
+      ],
+    });
+  }
 
   const notes: string[] = [];
   if (inputs.any_near_bound) {
@@ -90,6 +179,11 @@ export function buildConclusion(
     const thr = inputs.coverage_threshold ?? 0.97;
     notes.push(
       `Процент успешных оценок ниже порога ${fmtPct(thr)} — проверьте геометрию области поиска.`,
+    );
+  }
+  if (inputs.coverage_fill_triggered) {
+    notes.push(
+      "Использован двухпроходный подбор: сначала основная область поиска, затем дозаполнение неоценённых точек без перезаписи уже найденных оценок.",
     );
   }
   notes.push(
